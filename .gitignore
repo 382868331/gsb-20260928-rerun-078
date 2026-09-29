@@ -6,3 +6,8 @@ __pycache__/
 .env.*
 *.pem
 *.key
+
+# project
+backend/data/
+backend/topoplan
+frontend/dist/
