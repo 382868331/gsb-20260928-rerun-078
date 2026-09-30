@@ -88,6 +88,13 @@ func (s *Store) Save(t *topo.Topology, label string) (*Snapshot, error) {
 func (s *Store) Load(version int) (*Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.loadLocked(version)
+}
+
+// loadLocked must be called with mu held. Earlier List() called Load()
+// while already holding the mutex, deadlocking the whole API whenever a
+// snapshot existed (so the backend check never completed).
+func (s *Store) loadLocked(version int) (*Snapshot, error) {
 	b, err := os.ReadFile(s.path(version))
 	if err != nil {
 		return nil, err
@@ -122,7 +129,7 @@ func (s *Store) List() ([]Meta, error) {
 		if _, err := fmt.Sscanf(e.Name(), "v%06d.json", &v); err != nil {
 			continue
 		}
-		if snap, err := s.Load(v); err == nil {
+		if snap, err := s.loadLocked(v); err == nil {
 			metas = append(metas, snap.Meta)
 		}
 	}

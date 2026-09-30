@@ -19,6 +19,26 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
   const replaceAll = useTopoStore((s) => s.replaceAll);
   const fileRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState("");
+  const [versions, setVersions] = useState<{ version: number; label: string }[]>([]);
+
+  async function listVersions() {
+    try {
+      setVersions(await api.versions());
+    } catch (e) {
+      setMsg("版本列表不可用：" + (e as Error).message);
+    }
+  }
+
+  async function openVersion(v: number) {
+    if (!v) return;
+    try {
+      const snap = await api.loadVersion(v);
+      replaceAll(snap.topology, { keepHistory: false });
+      setMsg("已打开不可变版本 v" + v + "（同一版本的检查解释保持一致）");
+    } catch (e) {
+      setMsg("打开版本失败：" + (e as Error).message);
+    }
+  }
 
   async function save() {
     setMsg("");
@@ -68,6 +88,19 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
       <button onClick={redo} disabled={future.length === 0}>重做({future.length})</button>
       <span className="sep" />
       <button className="primary" onClick={save}>保存版本</button>
+      <select
+        value=""
+        onClick={listVersions}
+        onChange={(e) => openVersion(Number(e.target.value))}
+        title="重新打开已保存的不可变版本"
+      >
+        <option value={0}>打开版本…</option>
+        {versions.map((m) => (
+          <option key={m.version} value={m.version}>
+            v{m.version} {m.label}
+          </option>
+        ))}
+      </select>
       <button onClick={exportJSON}>导出 JSON</button>
       <button onClick={() => fileRef.current?.click()}>导入 JSON</button>
       <input

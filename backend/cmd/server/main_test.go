@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"topoplan/internal/store"
@@ -49,6 +50,33 @@ func baseTopo() *topo.Topology {
 		Nodes:  []topo.Node{{ID: "a"}, {ID: "b"}},
 		Links:  []topo.Link{{ID: "lab", Source: "a", Target: "b", Kind: topo.LinkDirected}},
 		Policy: topo.Policy{DefaultAction: topo.ActionDeny},
+	}
+}
+
+// Regression for the white screen: no-route responses must serialize
+// paths/blocked as empty arrays, never JSON null (null made the React
+// panel throw and blank the page).
+func TestCheckNoRouteNeverReturnsNullArrays(t *testing.T) {
+	_, h := newTestServer(t)
+	body := map[string]any{
+		"source": "a",
+		"target": "c",
+		"topology": &topo.Topology{
+			Nodes:  []topo.Node{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+			Links:  []topo.Link{{ID: "lab", Source: "a", Target: "b", Kind: topo.LinkDirected}},
+			Policy: topo.Policy{DefaultAction: topo.ActionDeny},
+		},
+	}
+	var buf bytes.Buffer
+	_ = json.NewEncoder(&buf).Encode(body)
+	req := httptest.NewRequest("POST", "/api/check", &buf)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "null") {
+		t.Fatalf("response must not contain null arrays: %s", rec.Body.String())
 	}
 }
 

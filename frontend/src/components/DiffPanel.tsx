@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useTopoStore } from "../state/topoStore";
-import type { DiffReport } from "../types";
+import type { DiffReport, PairResult } from "../types";
 
 export function DiffPanel() {
   const topo = useTopoStore((s) => s.topo);
@@ -17,7 +17,7 @@ export function DiffPanel() {
     }
     setErr("");
     try {
-      setReport(await api.diff(baseline, topo, false));
+      setReport(await api.diff(baseline, topo, true));
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -45,25 +45,53 @@ export function DiffPanel() {
           <div className="row2 diff-cols">
             <div>
               <h4 className="now-ok">新增可达</h4>
-              <ul>
-                {report.newReachable.map((p) => (
-                  <li key={p.source + p.target}>{p.source} → {p.target}</li>
-                ))}
-                {report.newReachable.length === 0 && <li className="hint">无</li>}
-              </ul>
+              {report.newReachable.length === 0 && <p className="hint">无</p>}
+              {report.newReachable.map((p) => <PairCard key={p.source + p.target} p={p} />)}
             </div>
             <div>
               <h4 className="now-no">被阻断</h4>
-              <ul>
-                {report.newBlocked.map((p) => (
-                  <li key={p.source + p.target}>{p.source} → {p.target}</li>
-                ))}
-                {report.newBlocked.length === 0 && <li className="hint">无</li>}
-              </ul>
+              {report.newBlocked.length === 0 && <p className="hint">无</p>}
+              {report.newBlocked.map((p) => <PairCard key={p.source + p.target} p={p} />)}
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function kindText(k: PairResult["beforeKind"]): string {
+  switch (k) {
+    case "direct": return "直达";
+    case "detour": return "绕行";
+    case "denied": return "默认/规则拒绝";
+    case "no-route": return "无物理路由";
+    default: return k;
+  }
+}
+
+function PairCard({ p }: { p: PairResult }) {
+  const changed = (p.segments ?? []).filter((s) => s.cause !== "none");
+  return (
+    <div className="pair-card">
+      <div className="pair-head">
+        <b>{p.source} → {p.target}</b>
+        <span className="hint">{kindText(p.beforeKind)} → {kindText(p.afterKind)}</span>
+      </div>
+      <div className="pair-paths">
+        <div>修订前：{(p.beforePath ?? []).length ? (p.beforePath ?? []).join(" → ") : "—"}</div>
+        <div>修订后：{(p.afterPath ?? []).length ? (p.afterPath ?? []).join(" → ") : "—"}</div>
+      </div>
+      {p.summary && <div className="pair-summary">{p.summary}</div>}
+      <ul className="seg-list">
+        {changed.map((s, i) => (
+          <li key={i} className={"seg seg-" + s.cause}>
+            <code>{s.from} → {s.to}</code>
+            {s.linkId ? <>（链路 <code>{s.linkId}</code>）</> : null}：{s.detail}
+          </li>
+        ))}
+        {changed.length === 0 && <li className="hint">无逐段规则差异（节点/链路拓扑变动）</li>}
+      </ul>
     </div>
   );
 }

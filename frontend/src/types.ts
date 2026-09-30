@@ -75,9 +75,35 @@ export interface PathResult {
   source: string;
   target: string;
   reachable: boolean;
-  paths: PathInfo[];
+  paths: PathInfo[]; // backend always emits [] but guard against null too
   blocked: PathInfo[];
   reason: string;
+}
+
+export type SegmentCause =
+  | "none"
+  | "rule-reordered"
+  | "rule-swap"
+  | "rule-edited"
+  | "rule-added"
+  | "rule-removed"
+  | "default-changed"
+  | "route-added"
+  | "route-removed";
+
+export interface SegmentDiff {
+  from: string;
+  to: string;
+  linkId: string;
+  present: "both" | "before-only" | "after-only";
+  beforeRuleId?: string;
+  beforeOrder: number;
+  beforeAction?: RuleAction;
+  afterRuleId?: string;
+  afterOrder: number;
+  afterAction?: RuleAction;
+  cause: SegmentCause;
+  detail: string;
 }
 
 export interface PairResult {
@@ -86,6 +112,12 @@ export interface PairResult {
   before: boolean;
   after: boolean;
   change: "none" | "now-reachable" | "now-blocked";
+  beforePath: string[];
+  afterPath: string[];
+  beforeKind: "direct" | "detour" | "denied" | "no-route";
+  afterKind: "direct" | "detour" | "denied" | "no-route";
+  segments: SegmentDiff[];
+  summary?: string;
 }
 
 export interface DiffReport {

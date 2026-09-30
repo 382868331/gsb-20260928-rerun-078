@@ -82,3 +82,14 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .now-no { color: #dc2626; font-weight: 600; }
 .diff-cols { gap: 14px; }
 .diff-cols ul { padding-left: 18px; font-size: 13px; margin: 4px 0; }
+.pair-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; margin: 6px 0; background: #fcfdff; font-size: 12px; }
+.pair-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.pair-paths { color: #334155; font-size: 12px; }
+.pair-summary { margin-top: 4px; color: #1d4ed8; }
+.seg-list { padding-left: 16px; margin: 4px 0 0; }
+.seg { margin: 2px 0; }
+.seg-rule-reordered, .seg-rule-swap { color: #b45309; }
+.seg-rule-edited, .seg-rule-added, .seg-rule-removed { color: #1d4ed8; }
+.seg-default-changed { color: #b91c1c; font-weight: 600; }
+.fatal { padding: 40px; }
+.fatal pre { background: #fee2e2; padding: 12px; border-radius: 6px; white-space: pre-wrap; }

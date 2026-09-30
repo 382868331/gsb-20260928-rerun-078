@@ -19,7 +19,9 @@ type PathResult struct {
 // is evaluated against the policy in rule order, and only paths whose
 // hops are all allowed count as reachable.
 func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
-	res := &PathResult{Source: src, Target: dst}
+	// Empty (never nil) slices: a JSON "null" array crashes strict
+	// frontend consumers and renders the page blank.
+	res := &PathResult{Source: src, Target: dst, Paths: []Path{}, Blocked: []Path{}}
 	eng, err := BuildEngine(t)
 	if err != nil {
 		return nil, err
@@ -33,7 +35,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 	if src == dst {
 		res.Reachable = true
 		res.Reason = "same-node"
-		res.Paths = []Path{{NodeIDs: []string{src}, Reachable: true}}
+		res.Paths = []Path{{NodeIDs: []string{src}, Hops: []Hop{}, Reachable: true}}
 		return res, nil
 	}
 	if k <= 0 {
@@ -65,7 +67,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 }
 
 func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
-	p := Path{NodeIDs: nodes, Reachable: len(nodes) >= 1}
+	p := Path{NodeIDs: nodes, Hops: []Hop{}, Reachable: len(nodes) >= 1}
 	for i := 0; i+1 < len(nodes); i++ {
 		linkID, reverse, ok := eng.edgeBetween(nodes[i], nodes[i+1])
 		if !ok {
@@ -215,7 +217,11 @@ func dijkstra(e *engine, src string, blockedNodes, blockedEdges map[string]bool)
 	for {
 		u := ""
 		best := inf
-		for id, d := range dist {
+		// Deterministic tie-break on node id: explanations of the same
+		// saved version must be identical on every reopen, never at the
+		// mercy of random map iteration order.
+		for _, id := range e.sortedNodeIDs {
+			d := dist[id]
 			if !visited[id] && d < best {
 				u, best = id, d
 			}

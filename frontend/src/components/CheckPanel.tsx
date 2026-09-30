@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useTopoStore } from "../state/topoStore";
 import type { PathResult } from "../types";
@@ -14,6 +14,13 @@ export function CheckPanel({ check, setCheck }: Props) {
   const [dst, setDst] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Monotonic token: a check response landing after a newer edit or
+  // request is discarded, so late results never overwrite new edits.
+  const runSeq = useRef(0);
+
+  useEffect(() => {
+    runSeq.current += 1;
+  }, [topo]);
 
   async function run() {
     if (!src || !dst) {
@@ -22,12 +29,22 @@ export function CheckPanel({ check, setCheck }: Props) {
     }
     setErr("");
     setBusy(true);
+    const seq = ++runSeq.current;
+    const snapshot = JSON.stringify(topo);
     try {
-      setCheck(await api.check(topo, src, dst, 3));
+      const res = await api.check(topo, src, dst, 3);
+      // The draft changed while the backend was computing: stale result.
+      if (
+        seq !== runSeq.current ||
+        JSON.stringify(useTopoStore.getState().topo) !== snapshot
+      ) {
+        return;
+      }
+      setCheck(res);
     } catch (e) {
-      setErr((e as Error).message);
+      if (seq === runSeq.current) setErr((e as Error).message);
     } finally {
-      setBusy(false);
+      if (seq === runSeq.current) setBusy(false);
     }
   }
 
@@ -55,21 +72,32 @@ export function CheckPanel({ check, setCheck }: Props) {
 }
 
 function Explanation({ r }: { r: PathResult }) {
+  const paths = Array.isArray(r.paths) ? r.paths : [];
+  const blocked = Array.isArray(r.blocked) ? r.blocked : [];
   return (
     <div className="explanation">
       <div className={r.reachable ? "verdict ok" : "verdict no"}>
         {r.source} → {r.target}：{r.reachable ? "可达 ✅" : "不可达 ❌"}
         <span className="reason">{reasonText(r.reason)}</span>
       </div>
+      {!r.reachable && (
+        <p className="hint">
+          {r.reason === "all-paths-denied"
+            ? "物理链路存在候选路径，但每条至少有一跳被有序规则或默认动作拒绝。"
+            : r.reason === "no-route"
+              ? "按链路方向没有物理路由（缺链路或方向相反），与策略放行无关。"
+              : "当前没有可行路径，详见下方候选路径的逐跳解释。"}
+        </p>
+      )}
 
-      {r.paths.length > 0 && (
+      {paths.length > 0 && (
         <div>
-          <h4>可行路径（{r.paths.length} 条，最短优先，可作绕行）</h4>
-          {r.paths.map((p, i) => (
+          <h4>可行路径（{paths.length} 条，最短优先，可作绕行）</h4>
+          {paths.map((p, i) => (
             <div key={i} className="path">
               <div className="path-nodes">路径{i + 1}：{p.nodeIds.join(" → ")}（{p.length} 跳）</div>
               <ol className="hops">
-                {p.hops.map((h, j) => (
+                {(p.hops ?? []).map((h, j) => (
                   <li key={j}>
                     <span className={h.action}>{h.action === "allow" ? "放行" : "拒绝"}</span>
                     {` ${h.from} → ${h.to}`} 经链路 <code>{h.linkId}</code>
@@ -85,14 +113,14 @@ function Explanation({ r }: { r: PathResult }) {
         </div>
       )}
 
-      {r.blocked.length > 0 && (
+      {blocked.length > 0 && (
         <div>
           <h4>被策略阻断的候选路径</h4>
-          {r.blocked.map((p, i) => (
+          {blocked.map((p, i) => (
             <div key={i} className="path blocked-path">
               <div className="path-nodes">{p.nodeIds.join(" → ")}</div>
               <ol className="hops">
-                {p.hops.map((h, j) => (
+                {(p.hops ?? []).map((h, j) => (
                   <li key={j} className={h.action === "deny" ? "deny-hop" : ""}>
                     <span className={h.action}>{h.action === "allow" ? "放行" : "拒绝"}</span>
                     {` ${h.from} → ${h.to}`} 经 <code>{h.linkId}</code>

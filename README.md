@@ -78,3 +78,25 @@ cd ../backend && go run ./cmd/server -static ../frontend/dist
   反向经过时 hop 上标记 `reverse:true`）。
 - 默认动作建议保持 `deny`：没有显式放行的跳一律不通。
 - 规则顺序即优先级：调整顺序会改变语义（测试中有正反例）。
+
+## 第二轮修复（白屏 / 段级差异 / 重开一致性）
+
+- 白屏根因：/api/check 在“无物理路由”等情况下把 paths/blocked
+  序列化为 JSON null（Go nil 切片），前端访问 r.paths.length 直接抛错
+  导致整页白屏。后端现在恒返回空数组（含同源节点、newReachable/newBlocked），
+  前端对 null 做了防御，并在根部加了 ErrorBoundary。
+  可达、不可达（all-paths-denied / no-route）与解释为空都给出可读结论。
+- 后端检查未完成的根因：store.List() 持锁调用同样加锁的 Load()，
+  只要数据目录存在快照（首次保存后必然如此）就自锁死，挂掉版本列表/启动流程。
+  已拆出 loadLocked() 并加 2 秒看门狗回归测试。
+  “未结束/无放行”绝不改判为可达，仍落入默认拒绝。
+- 策略修订前后段级差异：/api/diff 的每个变化节点对现在带
+  beforePath/afterPath、beforeKind/afterKind（直达/绕行/拒绝/无路由）
+  与 segments[]，逐段指出是哪条有序规则（ID + order + 动作）导致改判，
+  区分规则重排（rule-reordered / rule-swap）、规则增删改、
+  默认动作变化与路径段增删（绕行）。
+- 确定性：最短路径搜索在等距节点上按节点 ID 确定性打破平局，
+  同一不可变版本保存重开后逐跳解释一致（有 20 次重复测试）。
+- 迟到结果保护：前端检查请求带单调序号；拓扑在计算期间被编辑后，
+  迟到响应会被丢弃，不会覆盖新编辑内容（有 jsdom 测试）。
+- 启动时自动读取服务端草稿，工具栏可重新打开任意不可变版本。

@@ -1,6 +1,9 @@
 package topo
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // LinkKind controls how a link may be traversed.
 type LinkKind string
@@ -99,7 +102,8 @@ type HopDecision struct {
 type engine struct {
 	nodes map[string]*Node
 	// outgoing adjacency: nodeID -> list of (linkID, neighbor, reverse)
-	out map[string][][3]string
+	out           map[string][][3]string
+	sortedNodeIDs []string
 }
 
 func BuildEngine(t *Topology) (*engine, error) {
@@ -135,6 +139,12 @@ func BuildEngine(t *Topology) (*engine, error) {
 			return nil, fmt.Errorf("link %q has invalid kind %q", l.ID, l.Kind)
 		}
 	}
+	ids := make([]string, 0, len(e.nodes))
+	for id := range e.nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	e.sortedNodeIDs = ids
 	return e, nil
 }
 

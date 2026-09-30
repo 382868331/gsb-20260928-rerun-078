@@ -6,11 +6,13 @@ import { LinkPanel } from "./components/LinkPanel";
 import { NodePanel } from "./components/NodePanel";
 import { PolicyPanel } from "./components/PolicyPanel";
 import { Toolbar } from "./components/Toolbar";
+import { useServerDraft } from "./state/useServerDraft";
 import type { PathResult } from "./types";
 
 type Tab = "check" | "policy" | "diff";
 
 export function App() {
+  const draftStatus = useServerDraft();
   const [tab, setTab] = useState<Tab>("check");
   const [check, setCheck] = useState<PathResult | null>(null);
   const [linkMode, setLinkMode] = useState(false);
@@ -20,7 +22,10 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>网络拓扑设计平台</h1>
-        <span className="subtitle">离线设计 · 不连接真实网络 · 版本化拓扑（供后续容量规划复用同一版本）</span>
+        <span className="subtitle">
+          离线设计 · 不连接真实网络 · 版本化拓扑（供后续容量规划复用同一版本）
+          {draftStatus === "loading" ? " · 正在载入已保存草稿…" : draftStatus === "offline" ? " · 后端离线，使用本地示例" : ""}
+        </span>
       </header>
       <Toolbar linkMode={linkMode} setLinkMode={setLinkMode} setLinkStart={setLinkStart} />
       <div className="main">

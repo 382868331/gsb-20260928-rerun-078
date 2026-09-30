@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"topoplan/internal/topo"
 )
@@ -45,5 +46,21 @@ func TestSaveKeepsVersionLineageAndIDs(t *testing.T) {
 	metas, err := st.List()
 	if err != nil || len(metas) != 2 {
 		t.Fatalf("list=%v err=%v", metas, err)
+	}
+
+	// Regression: List() previously called Load() while holding the
+	// mutex and deadlocked, so any backend startup with existing
+	// snapshots hung and the whole check pipeline never completed.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := st.List(); err != nil {
+			t.Errorf("list under goroutine: %v", err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("List deadlocked")
 	}
 }
