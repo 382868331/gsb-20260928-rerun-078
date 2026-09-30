@@ -92,3 +92,86 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .hop-changes .before-after { color: #64748b; }
 .diff-cols { gap: 14px; }
 .diff-cols ul { padding-left: 18px; font-size: 13px; margin: 4px 0; }
+
+.dirty-tag {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #fff3cd;
+  color: #8a6d00;
+  font-size: 12px;
+}
+
+.stale-banner {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px solid #e0a800;
+  border-radius: 6px;
+  background: #fff8e1;
+  color: #7a5c00;
+  font-size: 13px;
+}
+
+.scenario-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.scenario-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.scenario-list li.current {
+  border-color: #2f6fed;
+  background: #eef4ff;
+}
+
+.scenario-list li em {
+  color: #777;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  max-width: 420px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.pair-row {
+  border: 1px solid #e2e2e2;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.scenario-diff .summary {
+  margin: 8px 0;
+}

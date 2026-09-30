@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { useTopoStore } from "../state/topoStore";
 import type { DiffReport, HopChange } from "../types";
 
-function PairChanges({ changes }: { changes?: HopChange[] }) {
+export function PairChanges({ changes }: { changes?: HopChange[] }) {
   const list = changes ?? [];
   if (list.length === 0) {
     return <div className="hint">逐跳归因：未定位到具体规则或链路变化</div>;

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { api } from "../lib/api";
+import { fingerprint } from "../lib/fingerprint";
 import { useTopoStore } from "../state/topoStore";
 import type { Topology } from "../types";
 
@@ -17,8 +18,11 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
   const redo = useTopoStore((s) => s.redo);
   const addNode = useTopoStore((s) => s.addNode);
   const replaceAll = useTopoStore((s) => s.replaceAll);
+  const markSaved = useTopoStore((s) => s.markSaved);
+  const savedFingerprint = useTopoStore((s) => s.savedFingerprint);
   const fileRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState("");
+  const dirty = fingerprint(topo) !== savedFingerprint;
 
   async function save() {
     setMsg("");
@@ -27,6 +31,7 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
       if (label === null) return;
       const snap = await api.save(topo, label);
       replaceAll(snap.topology);
+      markSaved();
       setMsg(`已保存为版本 v${snap.meta.version}`);
     } catch (e) {
       setMsg((e as Error).message);
@@ -51,6 +56,7 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
       // Server normalizes but never rewrites IDs: import keeps identity.
       const normalized = await api.importTopo(parsed);
       replaceAll(normalized, { keepHistory: false });
+      markSaved();
       setMsg(`已导入：${normalized.nodes.length} 节点 / ${normalized.links.length} 链路 / ${normalized.policy.rules.length} 规则，身份保持不变`);
     } catch (e) {
       setMsg("导入失败：" + (e as Error).message);
@@ -82,6 +88,7 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
         }}
       />
       <span className="version-tag">当前版本：v{topo.version || "未保存草稿"}</span>
+      {dirty && <span className="dirty-tag">有未保存修改</span>}
       {msg && <span className="msg">{msg}</span>}
     </div>
   );

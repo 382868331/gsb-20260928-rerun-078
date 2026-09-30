@@ -19,6 +19,8 @@ func newTestServer(t *testing.T) (*server, http.Handler) {
 	}
 	s := &server{store: st, draft: &topo.Topology{Policy: topo.Policy{DefaultAction: topo.ActionDeny}}}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/draft", s.getDraft)
+	mux.HandleFunc("PUT /api/draft", s.putDraft)
 	mux.HandleFunc("POST /api/save", s.save)
 	mux.HandleFunc("POST /api/check", s.check)
 	mux.HandleFunc("POST /api/diff", s.diff)

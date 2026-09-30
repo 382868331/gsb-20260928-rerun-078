@@ -31,10 +31,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := &server{store: st, draft: &topo.Topology{Policy: topo.Policy{DefaultAction: topo.ActionDeny}}}
-	if snap, err := st.Latest(); err == nil {
-		srv.draft = snap.Topo
-	}
+	srv := newServer(st)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", srv.health)
@@ -58,6 +55,21 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// newServer restores the working draft the user last saw: the
+// persisted draft wins (it includes unsaved edits), otherwise the
+// latest immutable snapshot, otherwise an empty deny-by-default
+// topology. A refresh therefore never silently resurrects a factory
+// sample in place of the user's saved work.
+func newServer(st *store.Store) *server {
+	srv := &server{store: st, draft: &topo.Topology{Policy: topo.Policy{DefaultAction: topo.ActionDeny}}}
+	if d, err := st.LoadDraft(); err == nil && d != nil {
+		srv.draft = d
+	} else if snap, err := st.Latest(); err == nil {
+		srv.draft = snap.Topo
+	}
+	return srv
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -95,6 +107,10 @@ func (s *server) putDraft(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draft = &t
 	s.mu.Unlock()
+	if err := s.store.SaveDraft(&t); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
 	writeJSON(w, 200, &t)
 }
 
@@ -125,6 +141,10 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draft = snap.Topo
 	s.mu.Unlock()
+	if err := s.store.SaveDraft(snap.Topo); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
 	writeJSON(w, 200, snap)
 }
 
@@ -246,6 +266,10 @@ func (s *server) importTopo(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draft = &t
 	s.mu.Unlock()
+	if err := s.store.SaveDraft(&t); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
 	writeJSON(w, 200, &t)
 }
 

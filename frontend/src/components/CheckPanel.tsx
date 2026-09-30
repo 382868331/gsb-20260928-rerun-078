@@ -1,20 +1,33 @@
 import { useRef, useState } from "react";
 import { api } from "../lib/api";
+import { fingerprint } from "../lib/fingerprint";
 import { useTopoStore } from "../state/topoStore";
 import type { PathResult } from "../types";
 
 interface Props {
-  check: PathResult | null;
-  setCheck: (r: PathResult | null) => void;
+  check: CheckState | null;
+  setCheck: (r: CheckState | null) => void;
 }
+
+// CheckState ties a check result to the editSeq it was computed from,
+// so explanations always correspond to the currently selected version
+// and a stale result can never pose as the current one.
+export interface CheckState {
+  result: PathResult;
+  seq: number;
+}
+
+export const LAST_CHECK_KEY = "topoplan:lastCheck";
 
 export function CheckPanel({ check, setCheck }: Props) {
   const topo = useTopoStore((s) => s.topo);
+  const editSeq = useTopoStore((s) => s.editSeq);
   const [src, setSrc] = useState("");
   const [dst, setDst] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const reqId = useRef(0);
+  const stale = check !== null && check.seq !== editSeq;
 
   async function run() {
     if (!src || !dst) {
@@ -30,7 +43,18 @@ export function CheckPanel({ check, setCheck }: Props) {
       // A topology edit may have happened while the check was in flight.
       // Never let a late result overwrite explanations for newer edits.
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
-        setCheck(res);
+        setCheck({ result: res, seq });
+        // Persist the result against the exact topology fingerprint so
+        // a page reload restores this conclusion only when the topology
+        // (nodes, links, rule order, default action) is identical.
+        try {
+          localStorage.setItem(
+            LAST_CHECK_KEY,
+            JSON.stringify({ fp: fingerprint(topo), src, dst, result: res }),
+          );
+        } catch {
+          /* storage unavailable: live without restore */
+        }
       }
     } catch (e) {
       if (reqId.current !== id) return;
@@ -58,7 +82,12 @@ export function CheckPanel({ check, setCheck }: Props) {
       </div>
       <button disabled={busy} onClick={run}>{busy ? "计算中…" : "检查连接并解释路径"}</button>
       {err && <div className="error">{err}</div>}
-      {check && <Explanation r={check} />}
+      {stale && (
+        <div className="stale-banner">
+          拓扑、规则或默认动作已修改，以下解释对应旧版本，请重新检查。
+        </div>
+      )}
+      {check && <Explanation r={check.result} />}
     </div>
   );
 }

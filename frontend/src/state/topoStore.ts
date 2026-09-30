@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Rule, RuleAction, TopoLink, TopoNode, Topology } from "../types";
 import { clone, uid } from "../lib/id";
 import { sampleTopology } from "../lib/sample";
+import { fingerprint } from "../lib/fingerprint";
 
 interface TopoState {
   topo: Topology;
@@ -11,6 +12,10 @@ interface TopoState {
   // policyBaseline is the snapshot used for "what changed" diffs:
   // captured on save/import/baseline-set, independent of the draft.
   policyBaseline: Topology | null;
+  // savedFingerprint is the fingerprint of the topology as last saved,
+  // loaded from the server, or switched to. Anything else is an
+  // unsaved draft and must never masquerade as a saved version.
+  savedFingerprint: string | null;
   past: Topology[];
   future: Topology[];
   selectedNode: string | null;
@@ -38,6 +43,7 @@ interface TopoState {
   select: (kind: "node" | "link" | "rule", id: string | null) => void;
   replaceAll: (t: Topology, options?: { keepHistory?: boolean }) => void;
   bumpEdit: () => void;
+  markSaved: () => void;
 }
 
 const MAX_HISTORY = 100;
@@ -50,6 +56,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
   topo: clone(sampleTopology),
   editSeq: 0,
   policyBaseline: null,
+  savedFingerprint: null,
   past: [],
   future: [],
   selectedNode: null,
@@ -288,4 +295,6 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     }),
 
   bumpEdit: () => set((s) => ({ editSeq: s.editSeq + 1 })),
+
+  markSaved: () => set((s) => ({ savedFingerprint: fingerprint(s.topo) })),
 }));

@@ -124,5 +124,6 @@ export interface DiffReport {
   afterVersion: number;
   newReachable: PairResult[];
   newBlocked: PairResult[];
+  unchanged?: PairResult[];
   totalPairs: number;
 }
