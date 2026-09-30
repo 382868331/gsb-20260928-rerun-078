@@ -32,15 +32,17 @@ export function Canvas({ check, linkMode, linkStart, setLinkStart }: Props) {
   const litLinks = new Set<string>();
   const deniedLinks = new Set<string>();
   if (check) {
-    const pool = check.paths.length > 0 ? check.paths : check.blocked;
+    const allowed = check.paths ?? [];
+    const blocked = check.blocked ?? [];
+    const pool = allowed.length > 0 ? allowed : blocked;
     pool.slice(0, 1).forEach((p) =>
-      p.hops.forEach((h) => {
+      (p.hops ?? []).forEach((h) => {
         litLinks.add(h.linkId);
         if (h.action === "deny") deniedLinks.add(h.linkId);
       }),
     );
-    check.blocked.forEach((p) =>
-      p.hops.forEach((h) => {
+    blocked.forEach((p) =>
+      (p.hops ?? []).forEach((h) => {
         if (h.action === "deny") deniedLinks.add(h.linkId);
       }),
     );

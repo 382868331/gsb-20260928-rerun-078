@@ -88,6 +88,13 @@ func (s *Store) Save(t *topo.Topology, label string) (*Snapshot, error) {
 func (s *Store) Load(version int) (*Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.loadLocked(version)
+}
+
+// loadLocked reads a snapshot without taking the mutex, so callers
+// that already hold s.mu (Latest/List) cannot deadlock against
+// themselves.
+func (s *Store) loadLocked(version int) (*Snapshot, error) {
 	b, err := os.ReadFile(s.path(version))
 	if err != nil {
 		return nil, err
@@ -102,11 +109,12 @@ func (s *Store) Load(version int) (*Snapshot, error) {
 func (s *Store) Latest() (*Snapshot, error) {
 	s.mu.Lock()
 	v := s.latestLocked()
-	s.mu.Unlock()
 	if v == 0 {
+		s.mu.Unlock()
 		return nil, os.ErrNotExist
 	}
-	return s.Load(v)
+	defer s.mu.Unlock()
+	return s.loadLocked(v)
 }
 
 func (s *Store) List() ([]Meta, error) {
@@ -122,7 +130,7 @@ func (s *Store) List() ([]Meta, error) {
 		if _, err := fmt.Sscanf(e.Name(), "v%06d.json", &v); err != nil {
 			continue
 		}
-		if snap, err := s.Load(v); err == nil {
+		if snap, err := s.loadLocked(v); err == nil {
 			metas = append(metas, snap.Meta)
 		}
 	}

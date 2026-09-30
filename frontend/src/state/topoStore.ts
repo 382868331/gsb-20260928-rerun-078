@@ -5,6 +5,9 @@ import { sampleTopology } from "../lib/sample";
 
 interface TopoState {
   topo: Topology;
+  // editSeq increments on every draft mutation; async check/diff
+  // responses captured before an edit use it to detect staleness.
+  editSeq: number;
   // policyBaseline is the snapshot used for "what changed" diffs:
   // captured on save/import/baseline-set, independent of the draft.
   policyBaseline: Topology | null;
@@ -34,6 +37,7 @@ interface TopoState {
 
   select: (kind: "node" | "link" | "rule", id: string | null) => void;
   replaceAll: (t: Topology, options?: { keepHistory?: boolean }) => void;
+  bumpEdit: () => void;
 }
 
 const MAX_HISTORY = 100;
@@ -44,6 +48,7 @@ function orderedRules(rules: Rule[]): Rule[] {
 
 export const useTopoStore = create<TopoState>((set, get) => ({
   topo: clone(sampleTopology),
+  editSeq: 0,
   policyBaseline: null,
   past: [],
   future: [],
@@ -94,6 +99,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     set((s) => {
       s.commit();
       return {
+        editSeq: s.editSeq + 1,
         topo: { ...s.topo, nodes: [...s.topo.nodes, node] },
         selectedNode: id,
         selectedLink: null,
@@ -105,6 +111,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
 
   updateNode: (id, patch) =>
     set((s) => ({
+      editSeq: s.editSeq + 1,
       topo: {
         ...s.topo,
         nodes: s.topo.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)),
@@ -118,6 +125,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
       );
       s.commit();
       return {
+        editSeq: s.editSeq + 1,
         selectedNode: s.selectedNode === id ? null : s.selectedNode,
         selectedLink:
           s.selectedLink &&
@@ -152,6 +160,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     set((s) => {
       s.commit();
       return {
+        editSeq: s.editSeq + 1,
         topo: { ...s.topo, links: [...s.topo.links, link] },
         selectedLink: id,
         selectedNode: null,
@@ -163,6 +172,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
 
   updateLink: (id, patch) =>
     set((s) => ({
+      editSeq: s.editSeq + 1,
       topo: {
         ...s.topo,
         links: s.topo.links.map((l) => (l.id === id ? { ...l, ...patch } : l)),
@@ -173,6 +183,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     set((s) => {
       s.commit();
       return {
+        editSeq: s.editSeq + 1,
         topo: {
           ...s.topo,
           links: s.topo.links.filter((l) => l.id !== id),
@@ -198,6 +209,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     set((s) => {
       s.commit();
       return {
+        editSeq: s.editSeq + 1,
         topo: { ...s.topo, policy: { ...s.topo.policy, rules: [...s.topo.policy.rules, rule] } },
         selectedRule: id,
       };
@@ -207,6 +219,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
 
   updateRule: (id, patch) =>
     set((s) => ({
+      editSeq: s.editSeq + 1,
       topo: {
         ...s.topo,
         policy: {
@@ -220,6 +233,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     set((s) => {
       s.commit();
       return {
+        editSeq: s.editSeq + 1,
         topo: {
           ...s.topo,
           policy: { ...s.topo.policy, rules: s.topo.policy.rules.filter((r) => r.id !== id) },
@@ -243,13 +257,13 @@ export const useTopoStore = create<TopoState>((set, get) => ({
         if (r.id === b.id) return { ...r, order: orderA };
         return r;
       });
-      return { topo: { ...s.topo, policy: { ...s.topo.policy, rules } } };
+      return { editSeq: s.editSeq + 1, topo: { ...s.topo, policy: { ...s.topo.policy, rules } } };
     }),
 
   setDefaultAction: (a) =>
     set((s) => {
       s.commit();
-      return { topo: { ...s.topo, policy: { ...s.topo.policy, defaultAction: a } } };
+      return { editSeq: s.editSeq + 1, topo: { ...s.topo, policy: { ...s.topo.policy, defaultAction: a } } };
     }),
 
   select: (kind, id) =>
@@ -263,12 +277,15 @@ export const useTopoStore = create<TopoState>((set, get) => ({
     set((s) => {
       const next = clone(t);
       if (options?.keepHistory === false) {
-        return { topo: next, past: [], future: [] };
+      return { topo: next, editSeq: s.editSeq + 1, past: [], future: [] };
       }
       return {
+        editSeq: s.editSeq + 1,
         topo: next,
         past: [...s.past.slice(-MAX_HISTORY + 1), clone(s.topo)],
         future: [],
       };
     }),
+
+  bumpEdit: () => set((s) => ({ editSeq: s.editSeq + 1 })),
 }));

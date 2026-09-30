@@ -80,5 +80,15 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .summary { font-size: 13px; margin: 10px 0; }
 .now-ok { color: #16a34a; font-weight: 600; }
 .now-no { color: #dc2626; font-weight: 600; }
+
+.hop-changes { list-style: none; padding-left: 10px; margin: 4px 0 8px; }
+.hop-changes .cause { font-size: 12px; color: #334155; border-left: 3px solid #94a3b8; padding: 3px 8px; margin: 3px 0; background: #f8fafc; }
+.hop-changes .cause code { font-size: 11px; }
+.hop-changes .cause-rule-reordered { border-left-color: #7c3aed; }
+.hop-changes .cause-rule-added, .hop-changes .cause-rule-enabled { border-left-color: #16a34a; }
+.hop-changes .cause-rule-removed, .hop-changes .cause-rule-disabled { border-left-color: #dc2626; }
+.hop-changes .cause-link-added { border-left-color: #2563eb; }
+.hop-changes .cause-link-removed, .hop-changes .cause-link-direction-changed { border-left-color: #d97706; }
+.hop-changes .before-after { color: #64748b; }
 .diff-cols { gap: 14px; }
 .diff-cols ul { padding-left: 18px; font-size: 13px; margin: 4px 0; }

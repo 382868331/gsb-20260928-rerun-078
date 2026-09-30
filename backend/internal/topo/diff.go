@@ -5,13 +5,36 @@ import "sort"
 // PairResult is the reachability explanation for one ordered
 // (source, target) pair under a given topology.
 type PairResult struct {
-	Source   string      `json:"source"`
-	Target   string      `json:"target"`
-	Before   bool        `json:"before"`
-	After    bool        `json:"after"`
-	Change   string      `json:"change"` // none | now-reachable | now-blocked
-	BeforeAt *PathResult `json:"beforeAt,omitempty"`
-	AfterAt  *PathResult `json:"afterAt,omitempty"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Before bool   `json:"before"`
+	After  bool   `json:"after"`
+	Change string `json:"change"` // none | now-reachable | now-blocked
+	// HopChanges attributes the reachability flip of this pair to the
+	// concrete ordered rule / default action / topology change that
+	// decided each affected segment. Always a list, never null.
+	HopChanges []HopChange `json:"hopChanges"`
+	BeforeAt   *PathResult `json:"beforeAt,omitempty"`
+	AfterAt    *PathResult `json:"afterAt,omitempty"`
+}
+
+// HopChange explains why one directed segment (from -> to over a link)
+// flipped between two policy/topology versions.
+type HopChange struct {
+	From            string `json:"from"`
+	To              string `json:"to"`
+	LinkID          string `json:"linkId"`
+	BeforeRuleID    string `json:"beforeRuleId,omitempty"`
+	BeforeRuleOrder int    `json:"beforeRuleOrder,omitempty"`
+	BeforeAction    string `json:"beforeAction,omitempty"` // allow | deny | default-allow | default-deny | no-route
+	AfterRuleID     string `json:"afterRuleId,omitempty"`
+	AfterRuleOrder  int    `json:"afterRuleOrder,omitempty"`
+	AfterAction     string `json:"afterAction,omitempty"`
+	// Cause: rule-reordered | rule-changed | rule-enabled | rule-disabled |
+	// rule-added | rule-removed | default-changed | link-added |
+	// link-removed | link-direction-changed | unchanged | unknown
+	Cause  string `json:"cause"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // DiffReport answers: after a policy edit, which ordered connections
@@ -54,7 +77,7 @@ func ComparePolicy(before, after *Topology, detailed bool) (*DiffReport, error) 
 			rep.TotalPairs++
 			b, _ := evalQuiet(before, s, d)
 			a, _ := evalQuiet(after, s, d)
-			pair := PairResult{Source: s, Target: d, Before: b, After: a}
+			pair := PairResult{Source: s, Target: d, Before: b, After: a, HopChanges: []HopChange{}}
 			if detailed {
 				br, _ := before.FindPaths(s, d, 2)
 				ar, _ := after.FindPaths(s, d, 2)
@@ -64,9 +87,11 @@ func ComparePolicy(before, after *Topology, detailed bool) (*DiffReport, error) 
 			switch {
 			case !b && a:
 				pair.Change = "now-reachable"
+				pair.HopChanges = explainFlip(before, after, s, d)
 				rep.NewReachable = append(rep.NewReachable, pair)
 			case b && !a:
 				pair.Change = "now-blocked"
+				pair.HopChanges = explainFlip(before, after, s, d)
 				rep.NewBlocked = append(rep.NewBlocked, pair)
 			default:
 				pair.Change = "none"

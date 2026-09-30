@@ -57,4 +57,20 @@ describe("topoStore identity and history", () => {
     expect(after.links).toHaveLength(0);
     expect(after.nodes.map((n) => n.id)).toEqual(["b", "c"]);
   });
+
+  it("bumps editSeq on every draft edit so late check results can be discarded", () => {
+    const before = useTopoStore.getState().editSeq;
+    const id = useTopoStore.getState().addNode({ id: "z", name: "Z", x: 0, y: 0 });
+    expect(useTopoStore.getState().editSeq).toBe(before + 1);
+    useTopoStore.getState().updateNode(id, { name: "Z2" });
+    expect(useTopoStore.getState().editSeq).toBe(before + 2);
+    const rid = useTopoStore.getState().addRule();
+    const seq3 = useTopoStore.getState().editSeq;
+    useTopoStore.getState().updateRule(rid, { action: "deny" });
+    expect(useTopoStore.getState().editSeq).toBe(seq3 + 1);
+    useTopoStore.getState().setDefaultAction("allow");
+    expect(useTopoStore.getState().editSeq).toBe(seq3 + 2);
+    useTopoStore.getState().removeNode(id);
+    expect(useTopoStore.getState().editSeq).toBe(seq3 + 3);
+  });
 });

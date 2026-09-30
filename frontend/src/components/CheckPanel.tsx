@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useTopoStore } from "../state/topoStore";
 import type { PathResult } from "../types";
@@ -14,6 +14,7 @@ export function CheckPanel({ check, setCheck }: Props) {
   const [dst, setDst] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const reqId = useRef(0);
 
   async function run() {
     if (!src || !dst) {
@@ -22,12 +23,20 @@ export function CheckPanel({ check, setCheck }: Props) {
     }
     setErr("");
     setBusy(true);
+    const seq = useTopoStore.getState().editSeq;
+    const id = ++reqId.current;
     try {
-      setCheck(await api.check(topo, src, dst, 3));
+      const res = normalizeResult(await api.check(topo, src, dst, 3));
+      // A topology edit may have happened while the check was in flight.
+      // Never let a late result overwrite explanations for newer edits.
+      if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
+        setCheck(res);
+      }
     } catch (e) {
+      if (reqId.current !== id) return;
       setErr((e as Error).message);
     } finally {
-      setBusy(false);
+      if (reqId.current === id) setBusy(false);
     }
   }
 
@@ -55,6 +64,8 @@ export function CheckPanel({ check, setCheck }: Props) {
 }
 
 function Explanation({ r }: { r: PathResult }) {
+  const paths = r.paths ?? [];
+  const blocked = r.blocked ?? [];
   return (
     <div className="explanation">
       <div className={r.reachable ? "verdict ok" : "verdict no"}>
@@ -62,10 +73,10 @@ function Explanation({ r }: { r: PathResult }) {
         <span className="reason">{reasonText(r.reason)}</span>
       </div>
 
-      {r.paths.length > 0 && (
+      {paths.length > 0 && (
         <div>
-          <h4>可行路径（{r.paths.length} 条，最短优先，可作绕行）</h4>
-          {r.paths.map((p, i) => (
+          <h4>可行路径（{paths.length} 条，最短优先，可作绕行）</h4>
+          {paths.map((p, i) => (
             <div key={i} className="path">
               <div className="path-nodes">路径{i + 1}：{p.nodeIds.join(" → ")}（{p.length} 跳）</div>
               <ol className="hops">
@@ -85,10 +96,10 @@ function Explanation({ r }: { r: PathResult }) {
         </div>
       )}
 
-      {r.blocked.length > 0 && (
+      {blocked.length > 0 && (
         <div>
           <h4>被策略阻断的候选路径</h4>
-          {r.blocked.map((p, i) => (
+          {blocked.map((p, i) => (
             <div key={i} className="path blocked-path">
               <div className="path-nodes">{p.nodeIds.join(" → ")}</div>
               <ol className="hops">
@@ -119,4 +130,16 @@ function reasonText(reason: string): string {
     case "same-node": return "（源宿相同）";
     default: return reason;
   }
+}
+
+// normalizeResult guarantees every array the UI maps over exists,
+// so a backend response of paths:null / blocked:null can never blank
+// the page. It also guarantees a human-readable reason string.
+function normalizeResult(r: PathResult): PathResult {
+  return {
+    ...r,
+    paths: r.paths ?? [],
+    blocked: r.blocked ?? [],
+    reason: r.reason || (r.reachable ? "allowed" : "no-route"),
+  };
 }

@@ -59,8 +59,8 @@ export interface Hop {
   to: string;
   linkId: string;
   reverse: boolean;
-  ruleId: string;
-  ruleOrder: number;
+  ruleId?: string;
+  ruleOrder?: number;
   action: RuleAction;
 }
 
@@ -86,6 +86,37 @@ export interface PairResult {
   before: boolean;
   after: boolean;
   change: "none" | "now-reachable" | "now-blocked";
+  hopChanges?: HopChange[];
+  beforeAt?: PathResult;
+  afterAt?: PathResult;
+}
+
+export type HopChangeCause =
+  | "rule-reordered"
+  | "rule-changed"
+  | "rule-enabled"
+  | "rule-disabled"
+  | "rule-added"
+  | "rule-removed"
+  | "default-changed"
+  | "link-added"
+  | "link-removed"
+  | "link-direction-changed"
+  | "unchanged"
+  | "unknown";
+
+export interface HopChange {
+  from: string;
+  to: string;
+  linkId: string;
+  beforeRuleId?: string;
+  beforeRuleOrder?: number;
+  beforeAction?: string;
+  afterRuleId?: string;
+  afterRuleOrder?: number;
+  afterAction?: string;
+  cause: HopChangeCause;
+  detail?: string;
 }
 
 export interface DiffReport {

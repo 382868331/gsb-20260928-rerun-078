@@ -1,6 +1,9 @@
 package topo
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // PathResult explains why a connection can or cannot pass:
 // every path returned (blocked ones included) reports the exact rule
@@ -19,7 +22,10 @@ type PathResult struct {
 // is evaluated against the policy in rule order, and only paths whose
 // hops are all allowed count as reachable.
 func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
-	res := &PathResult{Source: src, Target: dst}
+	res := &PathResult{
+		Source: src, Target: dst,
+		Paths: []Path{}, Blocked: []Path{}, // always emit [], never null
+	}
 	eng, err := BuildEngine(t)
 	if err != nil {
 		return nil, err
@@ -33,7 +39,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 	if src == dst {
 		res.Reachable = true
 		res.Reason = "same-node"
-		res.Paths = []Path{{NodeIDs: []string{src}, Reachable: true}}
+		res.Paths = []Path{{Hops: []Hop{}, NodeIDs: []string{src}, Reachable: true, Length: 0}}
 		return res, nil
 	}
 	if k <= 0 {
@@ -65,7 +71,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 }
 
 func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
-	p := Path{NodeIDs: nodes, Reachable: len(nodes) >= 1}
+	p := Path{Hops: []Hop{}, NodeIDs: nodes, Reachable: len(nodes) >= 1}
 	for i := 0; i+1 < len(nodes); i++ {
 		linkID, reverse, ok := eng.edgeBetween(nodes[i], nodes[i+1])
 		if !ok {
@@ -89,6 +95,9 @@ func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
 		if !d.Allowed {
 			p.Reachable = false
 		}
+		// Keep evaluating subsequent hops so blocked explanations cover
+		// the full route; the first denied hop is still what made the
+		// path unreachable, but downstream attribution stays aligned.
 		p.Hops = append(p.Hops, hop)
 	}
 	p.Length = len(p.Hops)
@@ -159,7 +168,7 @@ func yen(e *engine, src, dst string, limit int) [][]string {
 		}
 		best := 0
 		for j := 1; j < len(B); j++ {
-			if len(B[j]) < len(B[best]) {
+			if lessPath(B[j], B[best]) {
 				best = j
 			}
 		}
@@ -168,6 +177,21 @@ func yen(e *engine, src, dst string, limit int) [][]string {
 		_ = progressed
 	}
 	return A
+}
+
+// lessPath orders K-path candidates deterministically: fewer hops first,
+// then lexicographic node ids. This makes explanations for one saved
+// version identical on every run, regardless of Go map iteration.
+func lessPath(a, b []string) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 func sameSeq(a, b []string) bool {
@@ -212,10 +236,17 @@ func dijkstra(e *engine, src string, blockedNodes, blockedEdges map[string]bool)
 	}
 	dist[src] = 0
 	visited := map[string]bool{}
+	// Fixed iteration order removes map-randomness from equal-cost ties.
+	ordered := make([]string, 0, len(e.nodes))
+	for id := range e.nodes {
+		ordered = append(ordered, id)
+	}
+	sort.Strings(ordered)
 	for {
 		u := ""
 		best := inf
-		for id, d := range dist {
+		for _, id := range ordered {
+			d := dist[id]
 			if !visited[id] && d < best {
 				u, best = id, d
 			}
