@@ -1,5 +1,20 @@
 import type { DiffReport, PathResult, Topology } from "../types";
 
+// normalizeTopology guarantees the arrays the UI maps over always
+// exist; the backend serializes empty slices as null.
+export function normalizeTopology(t: Topology): Topology {
+  return {
+    ...t,
+    version: t.version || 0,
+    nodes: t.nodes ?? [],
+    links: t.links ?? [],
+    policy: {
+      defaultAction: t.policy?.defaultAction ?? "deny",
+      rules: t.policy?.rules ?? [],
+    },
+  };
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },

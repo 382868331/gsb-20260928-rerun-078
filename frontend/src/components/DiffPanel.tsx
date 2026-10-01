@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, normalizeTopology } from "../lib/api";
+import { useVersions } from "../lib/versions";
 import { useTopoStore } from "../state/topoStore";
-import type { DiffReport, HopChange } from "../types";
+import type { DiffReport, HopChange, Topology } from "../types";
 
 function PairChanges({ changes }: { changes?: HopChange[] }) {
   const list = changes ?? [];
@@ -17,9 +18,20 @@ function PairChanges({ changes }: { changes?: HopChange[] }) {
           <span className="before-after">
             {`  [${actionText(c.beforeAction)} → ${actionText(c.afterAction)}]`}
           </span>
+          {ruleTag(c.beforeRuleId, c.beforeRuleOrder, "前")}
+          {ruleTag(c.afterRuleId, c.afterRuleOrder, "后")}
         </li>
       ))}
     </ul>
+  );
+}
+
+function ruleTag(id?: string, order?: number, side?: string) {
+  if (!id) return null;
+  return (
+    <span className="rule-tag">
+      {` ${side}:${id}(#${order ?? "?"})`}
+    </span>
   );
 }
 
@@ -50,49 +62,91 @@ function actionText(a?: string): string {
   }
 }
 
+// pathShape summarizes a path as direct (1 hop), detour, or none, so
+// the panel can call out "直达 → 绕行 / 不可达" transitions explicitly.
+function pathShape(p: { before: boolean; after: boolean; beforeAt?: { paths?: { length: number }[] }; afterAt?: { paths?: { length: number }[] } }): string {
+  const bLen = p.beforeAt?.paths?.[0]?.length;
+  const aLen = p.afterAt?.paths?.[0]?.length;
+  const shape = (ok: boolean, len?: number) => (!ok ? "不可达" : len === 1 ? "直达" : len ? `绕行(${len}跳)` : "可达");
+  return `${shape(p.before, bLen)} → ${shape(p.after, aLen)}`;
+}
+
 export function DiffPanel() {
   const topo = useTopoStore((s) => s.topo);
-  const baseline = useTopoStore((s) => s.policyBaseline);
-  const setBaseline = useTopoStore((s) => s.setBaseline);
+  const dirty = useTopoStore((s) => s.editSeq !== s.cleanEditSeq);
+  const { versions } = useVersions();
+  const [selA, setSelA] = useState<string>("draft");
+  const [selB, setSelB] = useState<string>("draft");
   const [report, setReport] = useState<DiffReport | null>(null);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const reqId = useRef(0);
 
+  async function resolve(sel: string): Promise<Topology> {
+    if (sel === "draft") return topo;
+    const snap = await api.loadVersion(Number(sel));
+    return normalizeTopology(snap.topology);
+  }
+
+  function label(sel: string): string {
+    if (sel === "draft") return `当前草稿（基于 v${topo.version || "空"}${dirty ? "，未保存" : ""}）`;
+    return `v${sel}`;
+  }
+
   async function compare() {
-    if (!baseline) {
-      setErr("请先点击“以当前策略为基线”");
-      return;
-    }
     setErr("");
+    setBusy(true);
     const seq = useTopoStore.getState().editSeq;
     const id = ++reqId.current;
     try {
-      const rep = await api.diff(baseline, topo, false);
+      const [a, b] = await Promise.all([resolve(selA), resolve(selB)]);
+      // detailed=true attaches per-hop attribution: which ordered rule
+      // (or default action / link change) flipped each hop.
+      const rep = await api.diff(a, b, true);
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
         setReport(rep);
       }
     } catch (e) {
       if (reqId.current !== id) return;
       setErr((e as Error).message);
+    } finally {
+      if (reqId.current === id) setBusy(false);
     }
   }
+
+  const options = (
+    <>
+      <option value="draft">当前草稿{dirty ? "（未保存）" : ""}</option>
+      {versions.map((m) => (
+        <option key={m.version} value={String(m.version)}>
+          v{m.version} · {m.label || "（无备注）"}
+        </option>
+      ))}
+    </>
+  );
 
   return (
     <div className="diff">
       <div className="baseline-row">
-        <button onClick={setBaseline}>以当前策略为基线</button>
-        <button className="primary" onClick={compare} disabled={!baseline}>
-          比较：哪些连接新增可达 / 被阻断
+        <label>方案 A
+          <select value={selA} onChange={(e) => setSelA(e.target.value)}>{options}</select>
+        </label>
+        <label>方案 B
+          <select value={selB} onChange={(e) => setSelB(e.target.value)}>{options}</select>
+        </label>
+        <button className="primary" onClick={compare} disabled={busy}>
+          {busy ? "比较中…" : "比较两个方案"}
         </button>
       </div>
-      {baseline && (
-        <p className="hint">基线 v{baseline.version}（{baseline.policy.rules.length} 条规则），对全部有序节点对逐一计算方向。</p>
-      )}
+      <p className="hint">
+        对全部有序节点对逐一计算方向；逐跳归因标明是哪条规则（ID + 顺序）、
+        默认动作或链路变化使路径在直达 / 绕行 / 不可达之间切换。
+      </p>
       {err && <div className="error">{err}</div>}
       {report && (
         <div>
           <div className="summary">
-            共评估 <b>{report.totalPairs}</b> 个有序方向：
+            {label(selA)} → {label(selB)}：共评估 <b>{report.totalPairs}</b> 个有序方向，
             <span className="now-ok">新增可达 {report.newReachable.length}</span>，
             <span className="now-no">新被阻断 {report.newBlocked.length}</span>
           </div>
@@ -102,7 +156,7 @@ export function DiffPanel() {
               <ul>
                 {report.newReachable.map((p) => (
                   <li key={p.source + p.target}>
-                    <div>{p.source} → {p.target}</div>
+                    <div>{p.source} → {p.target}<span className="shape">{pathShape(p)}</span></div>
                     <PairChanges changes={p.hopChanges} />
                   </li>
                 ))}
@@ -114,7 +168,7 @@ export function DiffPanel() {
               <ul>
                 {report.newBlocked.map((p) => (
                   <li key={p.source + p.target}>
-                    <div>{p.source} → {p.target}</div>
+                    <div>{p.source} → {p.target}<span className="shape">{pathShape(p)}</span></div>
                     <PairChanges changes={p.hopChanges} />
                   </li>
                 ))}

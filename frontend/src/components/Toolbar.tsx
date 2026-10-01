@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, normalizeTopology } from "../lib/api";
 import { useTopoStore } from "../state/topoStore";
 import type { Topology } from "../types";
 
@@ -17,6 +17,8 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
   const redo = useTopoStore((s) => s.redo);
   const addNode = useTopoStore((s) => s.addNode);
   const replaceAll = useTopoStore((s) => s.replaceAll);
+  const loadSnapshot = useTopoStore((s) => s.loadSnapshot);
+  const dirty = useTopoStore((s) => s.editSeq !== s.cleanEditSeq);
   const fileRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState("");
 
@@ -26,7 +28,10 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
       const label = prompt("保存标签（版本备注）", `编辑于 ${new Date().toLocaleString()}`);
       if (label === null) return;
       const snap = await api.save(topo, label);
-      replaceAll(snap.topology);
+      // The snapshot comes back with its assigned version; loading it
+      // as a clean snapshot keeps the draft and the saved version in
+      // lockstep, so a later refresh restores exactly this state.
+      loadSnapshot(normalizeTopology(snap.topology));
       setMsg(`已保存为版本 v${snap.meta.version}`);
     } catch (e) {
       setMsg((e as Error).message);
@@ -81,7 +86,10 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
           e.target.value = "";
         }}
       />
-      <span className="version-tag">当前版本：v{topo.version || "未保存草稿"}</span>
+      <span className="version-tag">
+        当前版本：v{topo.version || "未保存草稿"}
+        {dirty && <em className="dirty-tag">（有未保存修改）</em>}
+      </span>
       {msg && <span className="msg">{msg}</span>}
     </div>
   );

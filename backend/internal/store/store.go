@@ -46,6 +46,43 @@ func (s *Store) path(v int) string {
 	return filepath.Join(s.dir, fmt.Sprintf("v%06d.json", v))
 }
 
+func (s *Store) draftPath() string {
+	return filepath.Join(s.dir, "draft.json")
+}
+
+// SaveDraft persists the working draft (unsaved or just-saved) so a
+// page refresh or server restart restores exactly what the user last
+// worked on, instead of falling back to a factory sample.
+func (s *Store) SaveDraft(t *topo.Topology) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.draftPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.draftPath())
+}
+
+// LoadDraft returns the persisted working draft, or os.ErrNotExist
+// when no draft was ever persisted.
+func (s *Store) LoadDraft() (*topo.Topology, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := os.ReadFile(s.draftPath())
+	if err != nil {
+		return nil, err
+	}
+	var t topo.Topology
+	if err := json.Unmarshal(b, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 // Save validates, stamps the next version and writes an immutable
 // snapshot. Node/link/rule IDs inside the payload are preserved.
 func (s *Store) Save(t *topo.Topology, label string) (*Snapshot, error) {

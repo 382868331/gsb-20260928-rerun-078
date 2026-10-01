@@ -8,6 +8,12 @@ interface TopoState {
   // editSeq increments on every draft mutation; async check/diff
   // responses captured before an edit use it to detect staleness.
   editSeq: number;
+  // cleanEditSeq is the editSeq at the last save/snapshot load.
+  // editSeq !== cleanEditSeq means there are unsaved changes.
+  cleanEditSeq: number;
+  // hydrated becomes true once the backend draft has been loaded (or
+  // loading failed); until then the sample is only a placeholder.
+  hydrated: boolean;
   // policyBaseline is the snapshot used for "what changed" diffs:
   // captured on save/import/baseline-set, independent of the draft.
   policyBaseline: Topology | null;
@@ -37,6 +43,11 @@ interface TopoState {
 
   select: (kind: "node" | "link" | "rule", id: string | null) => void;
   replaceAll: (t: Topology, options?: { keepHistory?: boolean }) => void;
+  // loadSnapshot replaces the draft with a saved/restored topology,
+  // clears undo history and marks the state clean (no unsaved edits).
+  loadSnapshot: (t: Topology) => void;
+  markClean: () => void;
+  setHydrated: (v: boolean) => void;
   bumpEdit: () => void;
 }
 
@@ -49,6 +60,8 @@ function orderedRules(rules: Rule[]): Rule[] {
 export const useTopoStore = create<TopoState>((set, get) => ({
   topo: clone(sampleTopology),
   editSeq: 0,
+  cleanEditSeq: 0,
+  hydrated: false,
   policyBaseline: null,
   past: [],
   future: [],
@@ -67,6 +80,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
       if (s.past.length === 0) return s;
       const prev = s.past[s.past.length - 1];
       return {
+        editSeq: s.editSeq + 1,
         topo: prev,
         past: s.past.slice(0, -1),
         future: [clone(s.topo), ...s.future].slice(0, MAX_HISTORY),
@@ -78,6 +92,7 @@ export const useTopoStore = create<TopoState>((set, get) => ({
       if (s.future.length === 0) return s;
       const [next, ...rest] = s.future;
       return {
+        editSeq: s.editSeq + 1,
         topo: next,
         future: rest,
         past: [...s.past, clone(s.topo)].slice(-MAX_HISTORY),
@@ -286,6 +301,19 @@ export const useTopoStore = create<TopoState>((set, get) => ({
         future: [],
       };
     }),
+
+  loadSnapshot: (t) =>
+    set((s) => ({
+      topo: clone(t),
+      editSeq: s.editSeq + 1,
+      cleanEditSeq: s.editSeq + 1,
+      past: [],
+      future: [],
+    })),
+
+  markClean: () => set((s) => ({ cleanEditSeq: s.editSeq })),
+
+  setHydrated: (v) => set({ hydrated: v }),
 
   bumpEdit: () => set((s) => ({ editSeq: s.editSeq + 1 })),
 }));

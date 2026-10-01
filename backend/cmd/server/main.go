@@ -32,25 +32,35 @@ func main() {
 		log.Fatal(err)
 	}
 	srv := &server{store: st, draft: &topo.Topology{Policy: topo.Policy{DefaultAction: topo.ActionDeny}}}
-	if snap, err := st.Latest(); err == nil {
+	// Restore the user's actual working state: the persisted draft wins
+	// (it reflects the last save/edit), then the latest snapshot. Only a
+	// brand-new data dir starts empty -- we never substitute a factory
+	// sample for a previously saved topology.
+	if d, err := st.LoadDraft(); err == nil {
+		srv.draft = d
+	} else if snap, err := st.Latest(); err == nil {
 		srv.draft = snap.Topo
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", srv.health)
-	mux.HandleFunc("GET /api/draft", srv.getDraft)
-	mux.HandleFunc("PUT /api/draft", srv.putDraft)
-	mux.HandleFunc("POST /api/save", srv.save)
-	mux.HandleFunc("GET /api/versions", srv.listVersions)
-	mux.HandleFunc("GET /api/versions/{v}", srv.getVersion)
-	mux.HandleFunc("POST /api/check", srv.check)
-	mux.HandleFunc("POST /api/diff", srv.diff)
-	mux.HandleFunc("POST /api/import", srv.importTopo)
+	srv.registerAPI(mux)
 	if *staticDir != "" {
 		mux.Handle("/", spaHandler(*staticDir))
 	}
 	log.Printf("topoplan listening on %s (data=%s)", *addr, *dataDir)
 	log.Fatal(http.ListenAndServe(*addr, mux))
+}
+
+func (s *server) registerAPI(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/draft", s.getDraft)
+	mux.HandleFunc("PUT /api/draft", s.putDraft)
+	mux.HandleFunc("POST /api/save", s.save)
+	mux.HandleFunc("GET /api/versions", s.listVersions)
+	mux.HandleFunc("GET /api/versions/{v}", s.getVersion)
+	mux.HandleFunc("POST /api/check", s.check)
+	mux.HandleFunc("POST /api/diff", s.diff)
+	mux.HandleFunc("POST /api/import", s.importTopo)
 }
 
 func envOr(k, def string) string {
@@ -95,7 +105,23 @@ func (s *server) putDraft(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draft = &t
 	s.mu.Unlock()
+	s.persistDraft()
 	writeJSON(w, 200, &t)
+}
+
+// persistDraft writes the current working draft to disk so a refresh
+// or restart restores it verbatim. A failure is logged but does not
+// fail the request: the in-memory state is still authoritative.
+func (s *server) persistDraft() {
+	s.mu.Lock()
+	d := s.draft
+	s.mu.Unlock()
+	if d == nil {
+		return
+	}
+	if err := s.store.SaveDraft(deepClone(d)); err != nil {
+		log.Printf("persist draft: %v", err)
+	}
 }
 
 type saveReq struct {
@@ -125,6 +151,7 @@ func (s *server) save(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draft = snap.Topo
 	s.mu.Unlock()
+	s.persistDraft()
 	writeJSON(w, 200, snap)
 }
 
@@ -246,6 +273,7 @@ func (s *server) importTopo(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.draft = &t
 	s.mu.Unlock()
+	s.persistDraft()
 	writeJSON(w, 200, &t)
 }
 

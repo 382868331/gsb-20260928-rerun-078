@@ -92,3 +92,27 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .hop-changes .before-after { color: #64748b; }
 .diff-cols { gap: 14px; }
 .diff-cols ul { padding-left: 18px; font-size: 13px; margin: 4px 0; }
+
+.scenario-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: #16213a;
+  border-bottom: 1px solid #2a3a5f;
+  flex-wrap: wrap;
+}
+.scenario-bar select { margin-left: 6px; min-width: 220px; }
+.dirty-tag { color: #f0b429; font-style: normal; margin-left: 4px; }
+.draft-dialog {
+  flex-basis: 100%;
+  border: 1px solid #f0b429;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #1d2a4a;
+}
+.draft-dialog-actions { display: flex; gap: 8px; margin-top: 6px; }
+.check-version-tag { color: #8fa8d8; font-size: 12px; margin: 6px 0; }
+.rule-tag { color: #9db4e0; font-size: 12px; }
+.shape { color: #8fa8d8; font-size: 12px; margin-left: 8px; }
+.hydrate-hint { padding: 4px 12px; }
