@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Canvas } from "./components/Canvas";
 import { CheckPanel } from "./components/CheckPanel";
+import { ConnPanel } from "./components/ConnPanel";
 import { DiffPanel } from "./components/DiffPanel";
 import { LinkPanel } from "./components/LinkPanel";
 import { NodePanel } from "./components/NodePanel";
@@ -12,7 +13,7 @@ import { loadCheckForVersion, type CachedCheck } from "./lib/checkCache";
 import { useTopoStore } from "./state/topoStore";
 import type { PathResult } from "./types";
 
-type Tab = "check" | "policy" | "diff";
+type Tab = "check" | "conn" | "policy" | "diff";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("check");
@@ -22,7 +23,12 @@ export function App() {
   const [checkVersion, setCheckVersion] = useState<number | null>(null);
   const [linkMode, setLinkMode] = useState(false);
   const [linkStart, setLinkStart] = useState<string | null>(null);
+  // hydrateError explains, in place, why the saved draft could not be
+  // restored; the visible sample is then clearly a placeholder, never
+  // a substitute for the user's actual topology.
+  const [hydrateError, setHydrateError] = useState<string | null>(null);
   const hydrated = useTopoStore((s) => s.hydrated);
+  const topoVersion = useTopoStore((s) => s.topo.version);
 
   // Hydrate from the backend on startup: the persisted draft (saved
   // topology, rule order, default action) replaces the placeholder
@@ -46,7 +52,9 @@ export function App() {
           }
         }
       })
-      .catch(() => undefined)
+      .catch((e) => {
+        if (!cancelled) setHydrateError((e as Error)?.message || "无法连接后端");
+      })
       .finally(() => {
         if (!cancelled) useTopoStore.getState().setHydrated(true);
       });
@@ -74,6 +82,17 @@ export function App() {
       <Toolbar linkMode={linkMode} setLinkMode={setLinkMode} setLinkStart={setLinkStart} />
       <ScenarioBar onScenarioLoaded={onScenarioLoaded} />
       {!hydrated && <div className="hint hydrate-hint">正在恢复已保存的拓扑…</div>}
+      {hydrated && hydrateError && (
+        <div className="hint hydrate-hint hydrate-error">
+          未能恢复已保存的拓扑（{hydrateError}）。当前显示的是示例占位拓扑（未保存草稿），
+          不是你之前保存的内容；画布仍可正常编辑，保存后将生成新版本。
+        </div>
+      )}
+      {hydrated && !hydrateError && topoVersion === 0 && (
+        <div className="hint hydrate-hint">
+          空数据目录：以下为示例拓扑（未保存草稿），保存后成为 v1；不会冒充任何已保存方案。
+        </div>
+      )}
       <div className="main">
         <div className="canvas-wrap">
           <Canvas check={check} linkMode={linkMode} linkStart={linkStart} setLinkStart={setLinkStart} />
@@ -96,11 +115,13 @@ export function App() {
         <div className="right-panel">
           <nav className="tabs">
             <button className={tab === "check" ? "active" : ""} onClick={() => setTab("check")}>连通性解释</button>
+            <button className={tab === "conn" ? "active" : ""} onClick={() => setTab("conn")}>连接检查</button>
             <button className={tab === "policy" ? "active" : ""} onClick={() => setTab("policy")}>策略规则</button>
             <button className={tab === "diff" ? "active" : ""} onClick={() => setTab("diff")}>方案对比</button>
           </nav>
           <section className="panel tab-body">
             {tab === "check" && <CheckPanel check={check} checkVersion={checkVersion} onCheckResult={onCheckResult} />}
+            {tab === "conn" && <ConnPanel />}
             {tab === "policy" && <PolicyPanel />}
             {tab === "diff" && <DiffPanel />}
           </section>

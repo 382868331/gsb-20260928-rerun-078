@@ -22,6 +22,12 @@ type PathResult struct {
 // is evaluated against the policy in rule order, and only paths whose
 // hops are all allowed count as reachable.
 func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
+	return t.FindPathsState(src, dst, k, "")
+}
+
+// FindPathsState is FindPaths evaluated for one connection-state
+// phase; rules carrying a connState matcher only fire for that phase.
+func (t *Topology) FindPathsState(src, dst string, k int, state string) (*PathResult, error) {
 	res := &PathResult{
 		Source: src, Target: dst,
 		Paths: []Path{}, Blocked: []Path{}, // always emit [], never null
@@ -48,7 +54,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 
 	candidates := yen(eng, src, dst, k*4)
 	for _, cand := range candidates {
-		p := t.evaluatePath(eng, cand)
+		p := t.evaluatePath(eng, cand, state)
 		if p.Reachable {
 			res.Paths = append(res.Paths, p)
 			if len(res.Paths) >= k {
@@ -70,7 +76,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 	return res, nil
 }
 
-func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
+func (t *Topology) evaluatePath(eng *engine, nodes []string, state string) Path {
 	p := Path{Hops: []Hop{}, NodeIDs: nodes, Reachable: len(nodes) >= 1}
 	for i := 0; i+1 < len(nodes); i++ {
 		linkID, reverse, ok := eng.edgeBetween(nodes[i], nodes[i+1])
@@ -78,7 +84,7 @@ func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
 			p.Reachable = false
 			break
 		}
-		d := t.DecideHop(nodes[i], nodes[i+1], linkID)
+		d := t.DecideHopState(nodes[i], nodes[i+1], linkID, state)
 		action := t.Policy.DefaultAction
 		if d.RuleID != "" {
 			if d.Allowed {

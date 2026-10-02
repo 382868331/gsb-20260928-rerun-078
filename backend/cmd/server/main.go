@@ -59,6 +59,8 @@ func (s *server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/versions", s.listVersions)
 	mux.HandleFunc("GET /api/versions/{v}", s.getVersion)
 	mux.HandleFunc("POST /api/check", s.check)
+	mux.HandleFunc("POST /api/conncheck", s.connCheck)
+	mux.HandleFunc("POST /api/conndiff", s.connDiff)
 	mux.HandleFunc("POST /api/diff", s.diff)
 	mux.HandleFunc("POST /api/import", s.importTopo)
 }
@@ -285,6 +287,99 @@ func deepClone(t *topo.Topology) *topo.Topology {
 }
 
 func errMissing(field string) error { return &fieldError{field} }
+
+type connCheckReq struct {
+	Topology  *topo.Topology `json:"topology,omitempty"`
+	Source    string         `json:"source"`
+	Target    string         `json:"target"`
+	MaxPaths  int            `json:"maxPaths"`
+	DownNodes []string       `json:"downNodes,omitempty"`
+	DownLinks []string       `json:"downLinks,omitempty"`
+	Timeout   bool           `json:"timeout,omitempty"`
+}
+
+// connCheck evaluates the connection lifecycle (establish / maintain /
+// return / teardown) under simulated timeout and disconnect
+// conditions. It is a pure what-if trial: the draft and every saved
+// version are left untouched.
+func (s *server) connCheck(w http.ResponseWriter, r *http.Request) {
+	var req connCheckReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	t := req.Topology
+	if t == nil {
+		s.mu.Lock()
+		t = s.draft
+		s.mu.Unlock()
+	}
+	if err := t.Normalize(); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	res, err := t.ConnCheck(req.Source, req.Target, req.MaxPaths, topo.ConnOptions{
+		DownNodes: req.DownNodes,
+		DownLinks: req.DownLinks,
+		Timeout:   req.Timeout,
+	})
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
+type connDiffReq struct {
+	Before      *topo.Topology    `json:"before,omitempty"`
+	After       *topo.Topology    `json:"after"`
+	BeforeV     int               `json:"beforeVersion,omitempty"`
+	Detailed    bool              `json:"detailed"`
+	Connections []topo.Connection `json:"connections,omitempty"`
+}
+
+// connDiff reports, separately, what a policy/route change does to
+// new connections (state=new over all ordered pairs) and to the
+// given existing connections (state=established on pinned paths).
+func (s *server) connDiff(w http.ResponseWriter, r *http.Request) {
+	var req connDiffReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	before := req.Before
+	if before == nil && req.BeforeV > 0 {
+		snap, err := s.store.Load(req.BeforeV)
+		if err != nil {
+			writeErr(w, 404, err)
+			return
+		}
+		before = snap.Topo
+	}
+	if before == nil {
+		s.mu.Lock()
+		before = s.draft
+		s.mu.Unlock()
+	}
+	if req.After == nil {
+		writeErr(w, 400, errMissing("after"))
+		return
+	}
+	if err := before.Normalize(); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if err := req.After.Normalize(); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	rep, err := topo.CompareConn(before, req.After, req.Connections, req.Detailed)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, 200, rep)
+}
 
 type fieldError struct{ f string }
 

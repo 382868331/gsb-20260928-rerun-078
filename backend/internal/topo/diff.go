@@ -55,7 +55,18 @@ type DiffReport struct {
 // before and after. detailed=true keeps the full path explanation on
 // every changed pair; unchanged pairs only carry their boolean state.
 func ComparePolicy(before, after *Topology, detailed bool) (*DiffReport, error) {
-	rep := &DiffReport{BeforeVersion: before.Version, AfterVersion: after.Version}
+	return ComparePolicyState(before, after, detailed, "")
+}
+
+// ComparePolicyState is ComparePolicy evaluated for one connection
+// state ("", "new", "established", "return"): rules carrying a
+// connState matcher only fire for their own traffic phase, so a diff
+// for new connections and one for established ones can differ.
+func ComparePolicyState(before, after *Topology, detailed bool, state string) (*DiffReport, error) {
+	rep := &DiffReport{
+		BeforeVersion: before.Version, AfterVersion: after.Version,
+		NewReachable: []PairResult{}, NewBlocked: []PairResult{}, // never null
+	}
 	idSet := map[string]struct{}{}
 	for _, n := range before.Nodes {
 		idSet[n.ID] = struct{}{}
@@ -75,23 +86,23 @@ func ComparePolicy(before, after *Topology, detailed bool) (*DiffReport, error) 
 				continue
 			}
 			rep.TotalPairs++
-			b, _ := evalQuiet(before, s, d)
-			a, _ := evalQuiet(after, s, d)
+			b, _ := evalQuietState(before, s, d, state)
+			a, _ := evalQuietState(after, s, d, state)
 			pair := PairResult{Source: s, Target: d, Before: b, After: a, HopChanges: []HopChange{}}
 			if detailed {
-				br, _ := before.FindPaths(s, d, 2)
-				ar, _ := after.FindPaths(s, d, 2)
+				br, _ := before.FindPathsState(s, d, 2, state)
+				ar, _ := after.FindPathsState(s, d, 2, state)
 				pair.BeforeAt = br
 				pair.AfterAt = ar
 			}
 			switch {
 			case !b && a:
 				pair.Change = "now-reachable"
-				pair.HopChanges = explainFlip(before, after, s, d)
+				pair.HopChanges = explainFlipState(before, after, s, d, state)
 				rep.NewReachable = append(rep.NewReachable, pair)
 			case b && !a:
 				pair.Change = "now-blocked"
-				pair.HopChanges = explainFlip(before, after, s, d)
+				pair.HopChanges = explainFlipState(before, after, s, d, state)
 				rep.NewBlocked = append(rep.NewBlocked, pair)
 			default:
 				pair.Change = "none"
@@ -108,7 +119,11 @@ func ComparePolicy(before, after *Topology, detailed bool) (*DiffReport, error) 
 // unknown endpoints count as unreachable rather than errors, because
 // diffs compare versions where nodes may be added or removed.
 func evalQuiet(t *Topology, src, dst string) (bool, error) {
-	r, err := t.FindPaths(src, dst, 1)
+	return evalQuietState(t, src, dst, "")
+}
+
+func evalQuietState(t *Topology, src, dst, state string) (bool, error) {
+	r, err := t.FindPathsState(src, dst, 1, state)
 	if err != nil {
 		return false, nil
 	}

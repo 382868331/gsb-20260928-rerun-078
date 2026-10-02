@@ -34,6 +34,19 @@ const (
 	ActionDeny  RuleAction = "deny"
 )
 
+// Connection states a rule can be scoped to. Empty means the rule
+// applies to every traffic phase; otherwise the rule only matches
+// hops evaluated for that phase:
+//
+//	new         first request of a connection (establishment)
+//	established keep-alive traffic of an already established connection
+//	return      return traffic of an established connection (dst -> src)
+const (
+	StateNew         = "new"
+	StateEstablished = "established"
+	StateReturn      = "return"
+)
+
 // Rule is a single ordered policy entry.
 // A rule matches a hop when every non-empty matcher equals the value
 // present on the hop or its endpoints. Rules are evaluated in Order
@@ -55,7 +68,8 @@ type Rule struct {
 	SrcAttrValue  string     `json:"srcAttrValue,omitempty"`
 	DstAttrName   string     `json:"dstAttrName,omitempty"`
 	DstAttrValue  string     `json:"dstAttrValue,omitempty"`
-	Protocol      string     `json:"protocol,omitempty"` // carried on link attrs, matched when set
+	Protocol      string     `json:"protocol,omitempty"`  // carried on link attrs, matched when set
+	ConnState     string     `json:"connState,omitempty"` // "", new, established, return
 	Note          string     `json:"note,omitempty"`
 }
 
@@ -154,11 +168,19 @@ func attrEqual(m map[string]string, name, want string) bool {
 	return m[name] == want
 }
 
-// DecideHop evaluates the ordered rule list for a directed hop.
+// DecideHop evaluates the ordered rule list for a directed hop with
+// no connection-state context (only stateless rules match).
+func (t *Topology) DecideHop(from, to, linkID string) HopDecision {
+	return t.DecideHopState(from, to, linkID, "")
+}
+
+// DecideHopState evaluates the ordered rule list for a directed hop
+// in the given connection-state phase. A rule with a ConnState set
+// only matches hops evaluated for that same phase.
 // Order is significant: enabled rules are sorted by Order (stable on
 // insertion position) and the first match wins. With no match the
 // policy default action applies.
-func (t *Topology) DecideHop(from, to, linkID string) HopDecision {
+func (t *Topology) DecideHopState(from, to, linkID, state string) HopDecision {
 	fromNode := t.nodeByID(from)
 	toNode := t.nodeByID(to)
 	link := t.linkByID(linkID)
@@ -176,6 +198,9 @@ func (t *Topology) DecideHop(from, to, linkID string) HopDecision {
 	for _, i := range order {
 		r := t.Policy.Rules[i]
 		if !r.Enabled {
+			continue
+		}
+		if r.ConnState != "" && r.ConnState != state {
 			continue
 		}
 		if r.SrcNode != "" && r.SrcNode != from {

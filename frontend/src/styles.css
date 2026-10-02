@@ -116,3 +116,18 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .rule-tag { color: #9db4e0; font-size: 12px; }
 .shape { color: #8fa8d8; font-size: 12px; margin-left: 8px; }
 .hydrate-hint { padding: 4px 12px; }
+
+.hydrate-error { color: #b45309; background: #fef3c7; border-radius: 6px; }
+.warn-tag { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 10px; background: #fef3c7; color: #b45309; font-size: 12px; }
+.phase { border: 1px solid #e2e8f0; border-left-width: 4px; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.phase.ok { border-left-color: #22c55e; }
+.phase.no { border-left-color: #ef4444; }
+.phase-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.phase-detail { font-size: 12px; color: #475569; margin: 4px 0; }
+.trial-conds { border: 1px dashed #cbd5e1; border-radius: 6px; margin: 8px 0; font-size: 13px; }
+.trial-conds legend { font-size: 12px; color: #64748b; padding: 0 6px; }
+.cond-group { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.cond-group span { color: #64748b; font-size: 12px; }
+.conn-impact ul, .conn-list ul, .trial-list ul { list-style: none; padding-left: 0; }
+.conn-impact li, .conn-list li, .trial-list li { margin: 6px 0; font-size: 13px; }
+.path-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }

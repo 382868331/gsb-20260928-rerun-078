@@ -1,5 +1,5 @@
 import { useTopoStore } from "../state/topoStore";
-import type { Rule, RuleAction } from "../types";
+import type { ConnState, Rule, RuleAction } from "../types";
 
 export function PolicyPanel() {
   const topo = useTopoStore((s) => s.topo);
@@ -108,6 +108,17 @@ export function PolicyPanel() {
           <label>链路协议（等于 link.attrs.protocol）
             <input value={rule.protocol ?? ""} placeholder="如 tcp / bgp" onChange={(e) => updateRule(rule.id, { protocol: e.target.value || undefined })} />
           </label>
+          <label>连接状态（仅匹配该流量阶段）
+            <select
+              value={rule.connState ?? ""}
+              onChange={(e) => updateRule(rule.id, { connState: (e.target.value || undefined) as ConnState | undefined })}
+            >
+              <option value="">任意阶段</option>
+              <option value="new">新连接（首次请求）</option>
+              <option value="established">已建立连接（保持流量）</option>
+              <option value="return">回程流量（已建立连接）</option>
+            </select>
+          </label>
           <label>备注
             <input value={rule.note ?? ""} onChange={(e) => updateRule(rule.id, { note: e.target.value })} />
           </label>
@@ -125,5 +136,6 @@ function describeMatch(r: Rule): string {
   if (r.dstKind) parts.push(`dst:${r.dstKind}`);
   if (r.linkId) parts.push(`link:${r.linkId}`);
   if (r.protocol) parts.push(`proto:${r.protocol}`);
+  if (r.connState) parts.push(`state:${r.connState}`);
   return parts.join("，");
 }

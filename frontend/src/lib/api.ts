@@ -1,4 +1,4 @@
-import type { DiffReport, PathResult, Topology } from "../types";
+import type { ConnDiffReport, ConnResult, Connection, DiffReport, PathResult, Topology } from "../types";
 
 // normalizeTopology guarantees the arrays the UI maps over always
 // exist; the backend serializes empty slices as null.
@@ -48,6 +48,21 @@ export const api = {
     req<DiffReport>("/api/diff", {
       method: "POST",
       body: JSON.stringify({ before, after, detailed }),
+    }),
+  connCheck: (
+    topology: Topology,
+    source: string,
+    target: string,
+    opts: { maxPaths?: number; downNodes?: string[]; downLinks?: string[]; timeout?: boolean } = {},
+  ) =>
+    req<ConnResult>("/api/conncheck", {
+      method: "POST",
+      body: JSON.stringify({ topology, source, target, ...opts }),
+    }),
+  connDiff: (before: Topology, after: Topology, connections: Connection[], detailed = false) =>
+    req<ConnDiffReport>("/api/conndiff", {
+      method: "POST",
+      body: JSON.stringify({ before, after, connections, detailed }),
     }),
   importTopo: (t: Topology) =>
     req<Topology>("/api/import", { method: "POST", body: JSON.stringify(t) }),

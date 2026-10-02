@@ -27,6 +27,7 @@ export interface Rule {
   order: number;
   enabled: boolean;
   action: RuleAction;
+  connState?: ConnState;
   srcNode?: string;
   dstNode?: string;
   srcKind?: string;
@@ -41,6 +42,9 @@ export interface Rule {
   protocol?: string;
   note?: string;
 }
+
+// ConnState scopes a rule to one traffic phase; "" matches all.
+export type ConnState = "" | "new" | "established" | "return";
 
 export interface Policy {
   defaultAction: RuleAction;
@@ -125,4 +129,49 @@ export interface DiffReport {
   newReachable: PairResult[];
   newBlocked: PairResult[];
   totalPairs: number;
+}
+
+export interface ConnPhase {
+  phase: "establish" | "maintain" | "return" | "teardown";
+  ok: boolean;
+  reason: string;
+  detail: string;
+  path?: PathResult;
+}
+
+export interface ConnResult {
+  source: string;
+  target: string;
+  state: "established" | "expired" | "broken" | "blocked";
+  establishable: boolean;
+  bidirectional: boolean;
+  asymmetric: boolean;
+  forward: PathResult;
+  maintain: PathResult;
+  return: PathResult;
+  phases: ConnPhase[];
+  reason: string;
+}
+
+export interface Connection {
+  id: string;
+  source: string;
+  target: string;
+  pathNodeIds?: string[];
+  state: string;
+}
+
+export interface ConnImpact {
+  connId: string;
+  source: string;
+  target: string;
+  beforeStatus: string;
+  afterStatus: "survives" | "broken-path" | "broken-policy";
+  detail: string;
+  afterHops: Hop[];
+}
+
+export interface ConnDiffReport {
+  newConns: DiffReport;
+  existing: ConnImpact[];
 }

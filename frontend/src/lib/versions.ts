@@ -15,7 +15,12 @@ export function useVersions() {
   const currentVersion = useTopoStore((s) => s.topo.version);
   const [versions, setVersions] = useState<VersionMeta[]>([]);
   const refresh = useCallback(() => {
-    api.versions().then(setVersions).catch(() => setVersions([]));
+    // The backend guarantees [], but coerce defensively: a null here
+    // used to crash every .map over the list and blank the page.
+    api
+      .versions()
+      .then((v) => setVersions(Array.isArray(v) ? v : []))
+      .catch(() => setVersions([]));
   }, []);
   useEffect(refresh, [refresh, currentVersion]);
   return { versions, refresh };

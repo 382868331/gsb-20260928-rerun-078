@@ -1,9 +1,33 @@
-# 网络拓扑设计平台（第一轮：节点 / 链路 / 策略工程）
+# 网络拓扑设计平台（第二轮：连接状态流量检查）
 
 离线的网络拓扑设计工具：**Go 负责计算，React 负责编辑**。不连接任何真实网络；
 每次保存生成不可变拓扑版本，后续容量规划将直接引用同一版本。
 
 ## 本轮交付的能力
+
+- 首次加载不再白屏：版本列表、差异报告等空集合在后端一律序列化为
+  `[]`（曾为 `null` 导致前端 map 崩溃整页空白），前端再做一层防御性
+  归一化；刷新可正常进入编辑。加载不到的资料在原位置说明——草稿恢复
+  失败时页面顶部明示原因，并标注当前显示的是示例占位拓扑而非用户保存
+  的内容；空数据目录的示例也明确标注“未保存草稿”，绝不冒充已保存方案。
+- 有连接状态的流量检查：规则可限定连接状态（`connState`：新连接 /
+  已建立 / 回程，空为任意阶段）。首次请求（state=new）、已建立连接的
+  保持流量（state=established）与回程流量（state=return，方向反转）
+  可遵守不同规则；连接检查按“建立 / 保持 / 回程 / 失效”四个阶段沿路径
+  逐跳给出依据。
+- 非对称返回不算全程可达：去程放行但回程被阻断时明确标注“非对称返回”，
+  `bidirectional=false`，绝不凭借一次放行认作全程可达。
+- 修改策略或路由后分别说明影响：`POST /api/conndiff` 对新连接
+  （state=new，全有序节点对）与已登记的已有连接（state=established，
+  按原路径逐段评估）分别给出影响——已有连接可能保持（survives）、
+  因路径断开（broken-path）或因策略拒绝（broken-policy），并给出具体
+  段与规则归因。
+- 试算不改变其他方案：连接检查支持模拟连接空闲超时、断开中间节点 /
+  链路，全部为纯计算，不修改草稿与任何已保存版本；不同流量阶段的试算
+  结果按版本缓存（localStorage），重开后每段解释仍对应原拓扑、策略及
+  连接状态，可比较规则重排、连接超时与中间节点断开的组合。
+
+## 第一轮能力（保留）
 
 - 刷新 / 重启不丢工作：工作草稿随每次编辑、保存、导入持久化到
   `draft.json`，重新打开时恢复用户保存的拓扑、规则顺序与默认动作；
@@ -87,6 +111,13 @@ cd ../backend && go run ./cmd/server -static ../frontend/dist
 - `GET /api/versions` / `GET /api/versions/{v}`：版本列表与快照。
 - `POST /api/check`：body 含 `{topology?,source,target,maxPaths}`，返回
   `reachable`、`paths[]`、`blocked[]`，每条路径逐跳带规则轨迹。
+- `POST /api/conncheck`：body 含 `{topology?,source,target,maxPaths,
+  downNodes?,downLinks?,timeout?}`，返回连接生命周期四阶段（建立 /
+  保持 / 回程 / 失效）的逐跳解释与 `state`、`asymmetric`、
+  `bidirectional` 结论。
+- `POST /api/conndiff`：body 含 `{after, before? | beforeVersion,
+  connections?, detailed}`，返回 `newConns`（新连接有序对差异）与
+  `existing[]`（每条已有连接的保持/断开影响）。
 - `POST /api/diff`：body 含 `{after, before? | beforeVersion, detailed}`，
   返回 `newReachable[]` 与 `newBlocked[]`（有序节点对）。
 - `POST /api/import`：导入外部拓扑 JSON，只做规范化与校验，不改任何 ID。

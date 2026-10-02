@@ -161,7 +161,7 @@ func (s *Store) List() ([]Meta, error) {
 	if err != nil {
 		return nil, err
 	}
-	var metas []Meta
+	metas := make([]Meta, 0) // never nil: the API must emit [], not null
 	for _, e := range entries {
 		var v int
 		if _, err := fmt.Sscanf(e.Name(), "v%06d.json", &v); err != nil {

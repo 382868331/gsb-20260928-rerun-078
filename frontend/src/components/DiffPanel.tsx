@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import { api, normalizeTopology } from "../lib/api";
+import { loadConnections } from "../lib/connCache";
+import { normalizeConnDiffReport } from "../lib/normalize";
 import { useVersions } from "../lib/versions";
 import { useTopoStore } from "../state/topoStore";
-import type { DiffReport, HopChange, Topology } from "../types";
+import type { ConnDiffReport, HopChange, Topology } from "../types";
 
 function PairChanges({ changes }: { changes?: HopChange[] }) {
   const list = changes ?? [];
@@ -77,7 +79,7 @@ export function DiffPanel() {
   const { versions } = useVersions();
   const [selA, setSelA] = useState<string>("draft");
   const [selB, setSelB] = useState<string>("draft");
-  const [report, setReport] = useState<DiffReport | null>(null);
+  const [report, setReport] = useState<ConnDiffReport | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const reqId = useRef(0);
@@ -100,9 +102,12 @@ export function DiffPanel() {
     const id = ++reqId.current;
     try {
       const [a, b] = await Promise.all([resolve(selA), resolve(selB)]);
-      // detailed=true attaches per-hop attribution: which ordered rule
-      // (or default action / link change) flipped each hop.
-      const rep = await api.diff(a, b, true);
+      // New connections (state=new) over all ordered pairs, plus the
+      // registered existing connections of the "before" side on their
+      // pinned paths -- the two impacts are reported separately.
+      const beforeVersion = selA === "draft" ? topo.version : Number(selA);
+      const conns = loadConnections(beforeVersion);
+      const rep = normalizeConnDiffReport(await api.connDiff(a, b, conns, true));
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
         setReport(rep);
       }
@@ -146,33 +151,53 @@ export function DiffPanel() {
       {report && (
         <div>
           <div className="summary">
-            {label(selA)} → {label(selB)}：共评估 <b>{report.totalPairs}</b> 个有序方向，
-            <span className="now-ok">新增可达 {report.newReachable.length}</span>，
-            <span className="now-no">新被阻断 {report.newBlocked.length}</span>
+            {label(selA)} → {label(selB)}：新连接（首次请求）共评估 <b>{report.newConns.totalPairs}</b> 个有序方向，
+            <span className="now-ok">新增可达 {report.newConns.newReachable.length}</span>，
+            <span className="now-no">新被阻断 {report.newConns.newBlocked.length}</span>；
+            已有连接 {report.existing.length} 条中
+            <span className="now-ok"> 保持 {report.existing.filter((e) => e.afterStatus === "survives").length} 条</span>，
+            <span className="now-no">断开 {report.existing.filter((e) => e.afterStatus !== "survives").length} 条</span>
           </div>
+          {report.existing.length > 0 && (
+            <div className="conn-impact">
+              <h4>已有连接影响（按原路径逐段评估 state=established）</h4>
+              <ul>
+                {report.existing.map((e) => (
+                  <li key={e.connId} className={e.afterStatus === "survives" ? "now-ok" : "now-no"}>
+                    <code>{e.connId}</code> {e.source} → {e.target}：
+                    {e.afterStatus === "survives" ? "保持" : e.afterStatus === "broken-path" ? "路径断开" : "策略拒绝"}
+                    <div className="hint">{e.detail}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {report.existing.length === 0 && (
+            <p className="hint">未登记已有连接：可在“连接检查”页试算后登记，此处将分别说明新连接与已有连接的影响。</p>
+          )}
           <div className="row2 diff-cols">
             <div>
-              <h4 className="now-ok">新增可达</h4>
+              <h4 className="now-ok">新连接新增可达</h4>
               <ul>
-                {report.newReachable.map((p) => (
+                {report.newConns.newReachable.map((p) => (
                   <li key={p.source + p.target}>
                     <div>{p.source} → {p.target}<span className="shape">{pathShape(p)}</span></div>
                     <PairChanges changes={p.hopChanges} />
                   </li>
                 ))}
-                {report.newReachable.length === 0 && <li className="hint">无</li>}
+                {report.newConns.newReachable.length === 0 && <li className="hint">无</li>}
               </ul>
             </div>
             <div>
-              <h4 className="now-no">被阻断</h4>
+              <h4 className="now-no">新连接被阻断</h4>
               <ul>
-                {report.newBlocked.map((p) => (
+                {report.newConns.newBlocked.map((p) => (
                   <li key={p.source + p.target}>
                     <div>{p.source} → {p.target}<span className="shape">{pathShape(p)}</span></div>
                     <PairChanges changes={p.hopChanges} />
                   </li>
                 ))}
-                {report.newBlocked.length === 0 && <li className="hint">无</li>}
+                {report.newConns.newBlocked.length === 0 && <li className="hint">无</li>}
               </ul>
             </div>
           </div>

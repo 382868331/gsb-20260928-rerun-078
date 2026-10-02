@@ -14,8 +14,25 @@ import (
 // happening to line up hop for hop (a new deny may move the chosen
 // route entirely).
 func explainFlip(before, after *Topology, src, dst string) []HopChange {
-	bRes, _ := before.FindPaths(src, dst, 5)
-	aRes, _ := after.FindPaths(src, dst, 5)
+	return explainFlipState(before, after, src, dst, "")
+}
+
+// explainFlipState is explainFlip evaluated for one connection-state
+// phase, so attribution matches the traffic phase being compared.
+func explainFlipState(before, after *Topology, src, dst, state string) []HopChange {
+	bRes, _ := before.FindPathsState(src, dst, 5, state)
+	aRes, _ := after.FindPathsState(src, dst, 5, state)
+	if bRes == nil || aRes == nil {
+		// An endpoint was added or removed between versions: there is
+		// no shared path to attribute, say so explicitly.
+		return []HopChange{{
+			From: src, To: dst,
+			BeforeAction: verdictAction(before, bRes),
+			AfterAction:  verdictAction(after, aRes),
+			Cause:        "unknown",
+			Detail:       "端点节点在某一版本中不存在，无法逐跳归因（节点可能被删除或新增）",
+		}}
+	}
 	bEng, _ := BuildEngine(before)
 	aEng, _ := BuildEngine(after)
 
@@ -34,7 +51,7 @@ func explainFlip(before, after *Topology, src, dst string) []HopChange {
 		// paths and see how the same segment was decided before.
 		for _, p := range aRes.Paths {
 			for _, ah := range p.Hops {
-				if c, flipped := segmentDecision(before, after, bEng, aEng, ah); flipped {
+				if c, flipped := segmentDecision(before, after, bEng, aEng, ah, state); flipped {
 					add(c)
 				}
 			}
@@ -50,7 +67,7 @@ func explainFlip(before, after *Topology, src, dst string) []HopChange {
 		for _, p := range aRes.Blocked {
 			for _, ah := range p.Hops {
 				if ah.RuleID != "" && !decisionAllows(after, ah) {
-					if c, flipped := segmentDecision(before, after, bEng, aEng, ah); flipped {
+					if c, flipped := segmentDecision(before, after, bEng, aEng, ah, state); flipped {
 						add(c)
 					}
 				}
@@ -77,7 +94,7 @@ func explainFlip(before, after *Topology, src, dst string) []HopChange {
 // segmentDecision evaluates the same directed segment (ah) under the
 // before policy and returns the change if its effective decision
 // flipped; ok=false when the segment is unchanged or uninformative.
-func segmentDecision(before, after *Topology, bEng, aEng *engine, ah Hop) (HopChange, bool) {
+func segmentDecision(before, after *Topology, bEng, aEng *engine, ah Hop, state string) (HopChange, bool) {
 	bl := linkByIDTopo(before, ah.LinkID)
 	al := linkByIDTopo(after, ah.LinkID)
 	c := HopChange{
@@ -103,12 +120,12 @@ func segmentDecision(before, after *Topology, bEng, aEng *engine, ah Hop) (HopCh
 		return c, false
 	}
 
-	bd := before.DecideHop(ah.From, ah.To, ah.LinkID)
+	bd := before.DecideHopState(ah.From, ah.To, ah.LinkID, state)
 	c.BeforeRuleID = bd.RuleID
 	c.BeforeRuleOrder = bd.RuleOrder
 	c.BeforeAction = decisionLabelD(before, bd)
 
-	if effectiveAllows(before, bd) == effectiveAllows(after, after.DecideHop(ah.From, ah.To, ah.LinkID)) && bd.RuleID == ah.RuleID {
+	if effectiveAllows(before, bd) == effectiveAllows(after, after.DecideHopState(ah.From, ah.To, ah.LinkID, state)) && bd.RuleID == ah.RuleID {
 		return c, false
 	}
 	if effectiveAllows(before, bd) == decisionAllows(after, ah) && bd.RuleID == ah.RuleID {
