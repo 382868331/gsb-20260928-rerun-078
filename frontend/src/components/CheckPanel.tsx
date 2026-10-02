@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { api } from "../lib/api";
-import { saveCheckForVersion } from "../lib/checkCache";
+import { normalizePathResult, saveCheckForVersion } from "../lib/checkCache";
 import { useTopoStore } from "../state/topoStore";
 import type { PathResult } from "../types";
 
@@ -31,7 +31,7 @@ export function CheckPanel({ check, checkVersion, onCheckResult }: Props) {
     const version = topo.version;
     const id = ++reqId.current;
     try {
-      const res = normalizeResult(await api.check(topo, src, dst, 3));
+      const res = normalizePathResult(await api.check(topo, src, dst, 3));
       // A topology edit or scenario switch may have happened while the
       // check was in flight. Never let a late result overwrite
       // explanations for the now-current version.
@@ -144,16 +144,4 @@ function reasonText(reason: string): string {
     case "same-node": return "（源宿相同）";
     default: return reason;
   }
-}
-
-// normalizeResult guarantees every array the UI maps over exists,
-// so a backend response of paths:null / blocked:null can never blank
-// the page. It also guarantees a human-readable reason string.
-function normalizeResult(r: PathResult): PathResult {
-  return {
-    ...r,
-    paths: r.paths ?? [],
-    blocked: r.blocked ?? [],
-    reason: r.reason || (r.reachable ? "allowed" : "no-route"),
-  };
 }

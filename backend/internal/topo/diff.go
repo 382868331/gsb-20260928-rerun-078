@@ -55,7 +55,10 @@ type DiffReport struct {
 // before and after. detailed=true keeps the full path explanation on
 // every changed pair; unchanged pairs only carry their boolean state.
 func ComparePolicy(before, after *Topology, detailed bool) (*DiffReport, error) {
-	rep := &DiffReport{BeforeVersion: before.Version, AfterVersion: after.Version}
+	rep := &DiffReport{
+		BeforeVersion: before.Version, AfterVersion: after.Version,
+		NewReachable: []PairResult{}, NewBlocked: []PairResult{}, // never null
+	}
 	idSet := map[string]struct{}{}
 	for _, n := range before.Nodes {
 		idSet[n.ID] = struct{}{}

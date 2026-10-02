@@ -116,3 +116,55 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .rule-tag { color: #9db4e0; font-size: 12px; }
 .shape { color: #8fa8d8; font-size: 12px; margin-left: 8px; }
 .hydrate-hint { padding: 4px 12px; }
+
+.load-error { padding: 4px 12px; color: #f0b429; }
+
+.conn .trial-box {
+  border: 1px solid #2a3a5f;
+  border-radius: 6px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.conn .trial-box legend { font-size: 12px; color: #8fa8d8; padding: 0 4px; }
+.conn .btn-row { display: flex; gap: 8px; margin: 6px 0; }
+.conn .warn {
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  background: #2a2111;
+  color: #fbbf24;
+  padding: 6px 10px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.phase { border-top: 1px solid #2a3a5f; padding-top: 6px; margin-top: 8px; }
+.phase h4 { margin: 4px 0; font-size: 13px; }
+.verdict-mini { font-size: 12px; margin-left: 8px; }
+.verdict-mini.ok { color: #4ade80; }
+.verdict-mini.no { color: #f87171; }
+.notes { list-style: none; padding-left: 10px; margin: 4px 0; }
+.notes li {
+  font-size: 12px;
+  color: #9db4e0;
+  border-left: 3px solid #3b82f6;
+  padding: 2px 8px;
+  margin: 2px 0;
+}
+.trials ul, .impact-list ul { list-style: none; padding-left: 6px; }
+.link-btn {
+  background: none;
+  border: none;
+  color: #7aa2f7;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 13px;
+  text-align: left;
+}
+.link-btn:hover { text-decoration: underline; }
+.link-btn.danger { color: #f87171; }
+.conn-impact { border-top: 1px solid #2a3a5f; margin-top: 14px; padding-top: 8px; }
+.impact-list h5 { margin: 8px 0 2px; font-size: 13px; }
+.impact-list li { font-size: 13px; margin: 4px 0; }

@@ -33,5 +33,20 @@ export function saveCheckForVersion(version: number, source: string, target: str
 
 export function loadCheckForVersion(version: number): CachedCheck | null {
   if (!version) return null;
-  return readAll()[String(version)] ?? null;
+  const hit = readAll()[String(version)];
+  if (!hit || !hit.result) return null;
+  // Older cache entries may carry null arrays; normalize on read so a
+  // restored explanation can never blank the page.
+  return { ...hit, result: normalizePathResult(hit.result) };
+}
+
+// normalizePathResult guarantees every array the UI maps over exists,
+// so a payload of paths:null / blocked:null is always renderable.
+export function normalizePathResult(r: PathResult): PathResult {
+  return {
+    ...r,
+    paths: r.paths ?? [],
+    blocked: r.blocked ?? [],
+    reason: r.reason || (r.reachable ? "allowed" : "no-route"),
+  };
 }

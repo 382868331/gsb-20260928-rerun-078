@@ -104,7 +104,8 @@ export function DiffPanel() {
       // (or default action / link change) flipped each hop.
       const rep = await api.diff(a, b, true);
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
-        setReport(rep);
+        // Null-safe: empty lists may serialize as null.
+        setReport({ ...rep, newReachable: rep.newReachable ?? [], newBlocked: rep.newBlocked ?? [] });
       }
     } catch (e) {
       if (reqId.current !== id) return;

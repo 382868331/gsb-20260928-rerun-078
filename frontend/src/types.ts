@@ -1,5 +1,7 @@
 export type LinkKind = "directed" | "undirected";
 export type RuleAction = "allow" | "deny";
+// Connection traffic state a rule is restricted to; undefined = any.
+export type ConnState = "new" | "established";
 
 export interface Attrs {
   [k: string]: string;
@@ -39,6 +41,7 @@ export interface Rule {
   dstAttrName?: string;
   dstAttrValue?: string;
   protocol?: string;
+  connState?: ConnState;
   note?: string;
 }
 
@@ -125,4 +128,52 @@ export interface DiffReport {
   newReachable: PairResult[];
   newBlocked: PairResult[];
   totalPairs: number;
+}
+
+export type ConnPhaseName = "establish" | "maintain" | "return" | "teardown";
+
+export interface ConnPhase {
+  name: ConnPhaseName;
+  title: string;
+  state: ConnState;
+  reachable: boolean;
+  paths: PathInfo[];
+  blocked: PathInfo[];
+  reason: string;
+  notes: string[];
+}
+
+export interface ConnCheckResult {
+  source: string;
+  target: string;
+  afterTimeout: boolean;
+  phases: ConnPhase[];
+  reachable: boolean;
+  reason: string;
+  asymmetric: boolean;
+  forwardNodes: string[];
+  returnNodes: string[];
+}
+
+export interface ConnPairResult {
+  source: string;
+  target: string;
+  newBefore: boolean;
+  newAfter: boolean;
+  estBefore: boolean;
+  estAfter: boolean;
+  newChange: "none" | "now-reachable" | "now-blocked";
+  estChange: "none" | "now-reachable" | "now-blocked";
+  timeoutRisk: boolean;
+  notes: string[];
+  afterDetail?: ConnCheckResult;
+}
+
+export interface ConnDiffReport {
+  beforeVersion: number;
+  afterVersion: number;
+  totalPairs: number;
+  newConnImpact: ConnPairResult[];
+  estConnImpact: ConnPairResult[];
+  timeoutRisks: ConnPairResult[];
 }

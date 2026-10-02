@@ -57,6 +57,9 @@ func (t *Topology) Normalize() error {
 		if r.Action != ActionAllow && r.Action != ActionDeny {
 			return fmt.Errorf("rule %q invalid action %q", r.ID, r.Action)
 		}
+		if r.ConnState != "" && r.ConnState != ConnNew && r.ConnState != ConnEstablished {
+			return fmt.Errorf("rule %q invalid connState %q", r.ID, r.ConnState)
+		}
 		if r.LinkID != "" && !linkSeen[r.LinkID] {
 			return fmt.Errorf("rule %q references missing link %q", r.ID, r.LinkID)
 		}

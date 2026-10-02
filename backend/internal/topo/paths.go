@@ -17,11 +17,22 @@ type PathResult struct {
 	Reason    string `json:"reason"`  // machine readable summary
 }
 
-// FindPaths performs an ordered-rule-aware Yen K-shortest-paths search.
+// FindPaths performs an ordered-rule-aware Yen K-shortest-paths search
+// for the first request of a new connection.
+func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
+	return t.FindPathsState(src, dst, k, ConnNew)
+}
+
+// FindPathsState is FindPaths evaluated for traffic in a specific
+// connection state ("new" first request, "established" return traffic
+// of an existing connection). Rules restricted to another state do not
+// match, so the two directions of one connection may follow different
+// rule sets.
+//
 // A mere cable between two nodes never implies reachability: every hop
 // is evaluated against the policy in rule order, and only paths whose
 // hops are all allowed count as reachable.
-func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
+func (t *Topology) FindPathsState(src, dst string, k int, state string) (*PathResult, error) {
 	res := &PathResult{
 		Source: src, Target: dst,
 		Paths: []Path{}, Blocked: []Path{}, // always emit [], never null
@@ -48,7 +59,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 
 	candidates := yen(eng, src, dst, k*4)
 	for _, cand := range candidates {
-		p := t.evaluatePath(eng, cand)
+		p := t.evaluatePath(eng, cand, state)
 		if p.Reachable {
 			res.Paths = append(res.Paths, p)
 			if len(res.Paths) >= k {
@@ -70,7 +81,7 @@ func (t *Topology) FindPaths(src, dst string, k int) (*PathResult, error) {
 	return res, nil
 }
 
-func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
+func (t *Topology) evaluatePath(eng *engine, nodes []string, state string) Path {
 	p := Path{Hops: []Hop{}, NodeIDs: nodes, Reachable: len(nodes) >= 1}
 	for i := 0; i+1 < len(nodes); i++ {
 		linkID, reverse, ok := eng.edgeBetween(nodes[i], nodes[i+1])
@@ -78,7 +89,7 @@ func (t *Topology) evaluatePath(eng *engine, nodes []string) Path {
 			p.Reachable = false
 			break
 		}
-		d := t.DecideHop(nodes[i], nodes[i+1], linkID)
+		d := t.DecideHopState(nodes[i], nodes[i+1], linkID, state)
 		action := t.Policy.DefaultAction
 		if d.RuleID != "" {
 			if d.Allowed {

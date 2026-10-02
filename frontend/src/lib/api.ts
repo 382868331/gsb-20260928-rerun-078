@@ -1,8 +1,12 @@
-import type { DiffReport, PathResult, Topology } from "../types";
+import type { ConnCheckResult, ConnDiffReport, DiffReport, PathResult, Topology } from "../types";
 
 // normalizeTopology guarantees the arrays the UI maps over always
-// exist; the backend serializes empty slices as null.
-export function normalizeTopology(t: Topology): Topology {
+// exist; the backend serializes empty slices as null. A null/garbage
+// payload degrades to an empty topology instead of crashing the page.
+export function normalizeTopology(t: Topology | null | undefined): Topology {
+  if (!t || typeof t !== "object") {
+    return { version: 0, nodes: [], links: [], policy: { defaultAction: "deny", rules: [] } };
+  }
   return {
     ...t,
     version: t.version || 0,
@@ -46,6 +50,16 @@ export const api = {
     }),
   diff: (before: Topology, after: Topology, detailed = false) =>
     req<DiffReport>("/api/diff", {
+      method: "POST",
+      body: JSON.stringify({ before, after, detailed }),
+    }),
+  connCheck: (topology: Topology, source: string, target: string, maxPaths = 3, afterTimeout = false) =>
+    req<ConnCheckResult>("/api/conncheck", {
+      method: "POST",
+      body: JSON.stringify({ topology, source, target, maxPaths, afterTimeout }),
+    }),
+  connDiff: (before: Topology, after: Topology, detailed = false) =>
+    req<ConnDiffReport>("/api/conndiff", {
       method: "POST",
       body: JSON.stringify({ before, after, detailed }),
     }),

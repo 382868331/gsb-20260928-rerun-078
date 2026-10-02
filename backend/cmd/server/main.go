@@ -60,6 +60,8 @@ func (s *server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/versions/{v}", s.getVersion)
 	mux.HandleFunc("POST /api/check", s.check)
 	mux.HandleFunc("POST /api/diff", s.diff)
+	mux.HandleFunc("POST /api/conncheck", s.connCheck)
+	mux.HandleFunc("POST /api/conndiff", s.connDiff)
 	mux.HandleFunc("POST /api/import", s.importTopo)
 }
 
@@ -285,6 +287,92 @@ func deepClone(t *topo.Topology) *topo.Topology {
 }
 
 func errMissing(field string) error { return &fieldError{field} }
+
+type connCheckReq struct {
+	Topology     *topo.Topology `json:"topology,omitempty"`
+	Source       string         `json:"source"`
+	Target       string         `json:"target"`
+	MaxPaths     int            `json:"maxPaths"`
+	AfterTimeout bool           `json:"afterTimeout"`
+}
+
+// connCheck explains one connection across its lifecycle phases
+// (establish / maintain / return / teardown). The topology in the
+// body is used as-is, so what-if trials (node removed, rules
+// reordered) never disturb the stored draft or other scenarios.
+func (s *server) connCheck(w http.ResponseWriter, r *http.Request) {
+	var req connCheckReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	t := req.Topology
+	if t == nil {
+		s.mu.Lock()
+		t = s.draft
+		s.mu.Unlock()
+	}
+	if err := t.Normalize(); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	res, err := t.ConnCheck(req.Source, req.Target, req.MaxPaths, req.AfterTimeout)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
+type connDiffReq struct {
+	Before   *topo.Topology `json:"before,omitempty"`
+	After    *topo.Topology `json:"after"`
+	BeforeV  int            `json:"beforeVersion,omitempty"`
+	Detailed bool           `json:"detailed"`
+}
+
+// connDiff reports the impact of an edit split by connection state:
+// new connections, already-established connections, and connections
+// that only survive until their next timeout.
+func (s *server) connDiff(w http.ResponseWriter, r *http.Request) {
+	var req connDiffReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	before := req.Before
+	if before == nil && req.BeforeV > 0 {
+		snap, err := s.store.Load(req.BeforeV)
+		if err != nil {
+			writeErr(w, 404, err)
+			return
+		}
+		before = snap.Topo
+	}
+	if before == nil {
+		s.mu.Lock()
+		before = s.draft
+		s.mu.Unlock()
+	}
+	if req.After == nil {
+		writeErr(w, 400, errMissing("after"))
+		return
+	}
+	if err := before.Normalize(); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	if err := req.After.Normalize(); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	rep, err := topo.ConnDiff(before, req.After, req.Detailed)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, 200, rep)
+}
 
 type fieldError struct{ f string }
 

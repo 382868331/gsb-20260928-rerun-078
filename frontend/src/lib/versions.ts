@@ -15,7 +15,12 @@ export function useVersions() {
   const currentVersion = useTopoStore((s) => s.topo.version);
   const [versions, setVersions] = useState<VersionMeta[]>([]);
   const refresh = useCallback(() => {
-    api.versions().then(setVersions).catch(() => setVersions([]));
+    // Guard against a null/non-array payload (older backends serialize
+    // an empty list as null): the page must never blank over it.
+    api
+      .versions()
+      .then((v) => setVersions(Array.isArray(v) ? v : []))
+      .catch(() => setVersions([]));
   }, []);
   useEffect(refresh, [refresh, currentVersion]);
   return { versions, refresh };
