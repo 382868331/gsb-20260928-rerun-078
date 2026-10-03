@@ -289,13 +289,18 @@ func deepClone(t *topo.Topology) *topo.Topology {
 func errMissing(field string) error { return &fieldError{field} }
 
 type connCheckReq struct {
-	Topology  *topo.Topology `json:"topology,omitempty"`
-	Source    string         `json:"source"`
-	Target    string         `json:"target"`
-	MaxPaths  int            `json:"maxPaths"`
-	DownNodes []string       `json:"downNodes,omitempty"`
-	DownLinks []string       `json:"downLinks,omitempty"`
-	Timeout   bool           `json:"timeout,omitempty"`
+	Topology     *topo.Topology    `json:"topology,omitempty"`
+	Source       string            `json:"source"`
+	Target       string            `json:"target"`
+	MaxPaths     int               `json:"maxPaths"`
+	DownNodes    []string          `json:"downNodes,omitempty"`
+	DownLinks    []string          `json:"downLinks,omitempty"`
+	Timeout      bool              `json:"timeout,omitempty"`
+	SrcPort      int               `json:"srcPort,omitempty"`
+	DstPort      int               `json:"dstPort,omitempty"`
+	Existing     []topo.Connection `json:"existing,omitempty"`
+	ExpiredConns []string          `json:"expiredConns,omitempty"`
+	NATRanges    map[string][2]int `json:"natRanges,omitempty"`
 }
 
 // connCheck evaluates the connection lifecycle (establish / maintain /
@@ -319,9 +324,14 @@ func (s *server) connCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := t.ConnCheck(req.Source, req.Target, req.MaxPaths, topo.ConnOptions{
-		DownNodes: req.DownNodes,
-		DownLinks: req.DownLinks,
-		Timeout:   req.Timeout,
+		DownNodes:    req.DownNodes,
+		DownLinks:    req.DownLinks,
+		Timeout:      req.Timeout,
+		SrcPort:      req.SrcPort,
+		DstPort:      req.DstPort,
+		Existing:     req.Existing,
+		ExpiredConns: req.ExpiredConns,
+		NATRanges:    req.NATRanges,
 	})
 	if err != nil {
 		writeErr(w, 400, err)

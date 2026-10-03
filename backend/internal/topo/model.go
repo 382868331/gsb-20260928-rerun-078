@@ -17,6 +17,10 @@ type Node struct {
 	X     int               `json:"x"`
 	Y     int               `json:"y"`
 	Attrs map[string]string `json:"attrs,omitempty"`
+	// NAT, when present and enabled, makes this node an address
+	// translation device: connections crossing it get their source
+	// address/port rewritten from its deterministic port pool.
+	NAT *NATConfig `json:"nat,omitempty"`
 }
 
 type Link struct {

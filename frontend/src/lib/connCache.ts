@@ -14,6 +14,10 @@ export interface ConnTrial {
   downNodes: string[];
   downLinks: string[];
   timeout: boolean;
+  srcPort: number;
+  dstPort: number;
+  expiredConns: string[];
+  natRanges: Record<string, [number, number]>;
   result: ConnResult;
 }
 
@@ -52,10 +56,22 @@ function put(version: number, data: VersionConnData) {
   writeAll(all);
 }
 
-export function trialKey(source: string, target: string, downNodes: string[], downLinks: string[], timeout: boolean): string {
+export function trialKey(
+  source: string,
+  target: string,
+  downNodes: string[],
+  downLinks: string[],
+  timeout: boolean,
+  srcPort = 0,
+  dstPort = 0,
+  expiredConns: string[] = [],
+  natRanges: Record<string, [number, number]> = {},
+): string {
   const n = [...downNodes].sort().join(",");
   const l = [...downLinks].sort().join(",");
-  return [source, target, "n:" + n, "l:" + l, timeout ? "t:1" : "t:0"].join("|");
+  const e = [...expiredConns].sort().join(",");
+  const r = Object.keys(natRanges).sort().map((k) => `${k}:${natRanges[k][0]}-${natRanges[k][1]}`).join(",");
+  return [source, target, "n:" + n, "l:" + l, timeout ? "t:1" : "t:0", `p:${srcPort}-${dstPort}`, "e:" + e, "r:" + r].join("|");
 }
 
 export function loadConnections(version: number): Connection[] {
@@ -86,4 +102,3 @@ export function removeTrial(version: number, key: string) {
   if (d.trials) delete d.trials[key];
   put(version, d);
 }
-

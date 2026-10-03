@@ -19,6 +19,9 @@ function normalizePath(p: PathResult["paths"][number]): PathResult["paths"][numb
 export function normalizeConnResult(r: ConnResult): ConnResult {
   return {
     ...r,
+    natEvents: r.natEvents ?? [],
+    newMappings: r.newMappings ?? [],
+    keptMappings: r.keptMappings ?? [],
     forward: normalizePathResult(r.forward),
     maintain: normalizePathResult(r.maintain),
     return: normalizePathResult(r.return),
@@ -43,4 +46,3 @@ export function normalizeConnDiffReport(r: ConnDiffReport): ConnDiffReport {
     existing: (r.existing ?? []).map((e) => ({ ...e, afterHops: e.afterHops ?? [] })),
   };
 }
-

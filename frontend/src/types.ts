@@ -12,6 +12,16 @@ export interface TopoNode {
   x: number;
   y: number;
   attrs?: Attrs;
+  nat?: NATConfig;
+}
+
+// NATConfig turns a node into an address-translation device with a
+// deterministic port pool.
+export interface NATConfig {
+  enabled: boolean;
+  address: string;
+  portStart: number;
+  portEnd: number;
 }
 
 export interface TopoLink {
@@ -151,6 +161,35 @@ export interface ConnResult {
   return: PathResult;
   phases: ConnPhase[];
   reason: string;
+  natEvents: NATHopEvent[];
+  newMappings: NATMapping[];
+  keptMappings: NATMapping[];
+}
+
+export interface NATMapping {
+  device: string;
+  insideAddr: string;
+  insidePort: number;
+  natAddr: string;
+  natPort: number;
+  peerAddr: string;
+  peerPort: number;
+  connId?: string;
+  status: string;
+}
+
+// NATHopEvent is one translation decision along the checked
+// connection; direction: forward | return | late-return.
+export interface NATHopEvent {
+  device: string;
+  direction: string;
+  preAddr: string;
+  prePort: number;
+  postAddr: string;
+  postPort: number;
+  decision: string;
+  connId?: string;
+  detail: string;
 }
 
 export interface Connection {
@@ -159,6 +198,11 @@ export interface Connection {
   target: string;
   pathNodeIds?: string[];
   state: string;
+  srcAddr?: string;
+  srcPort?: number;
+  dstAddr?: string;
+  dstPort?: number;
+  mappings?: NATMapping[];
 }
 
 export interface ConnImpact {
@@ -166,9 +210,10 @@ export interface ConnImpact {
   source: string;
   target: string;
   beforeStatus: string;
-  afterStatus: "survives" | "broken-path" | "broken-policy";
+  afterStatus: "survives" | "broken-path" | "broken-policy" | "broken-nat";
   detail: string;
   afterHops: Hop[];
+  mappingStatus?: "kept" | "invalidated-range" | "device-removed";
 }
 
 export interface ConnDiffReport {

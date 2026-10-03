@@ -5,6 +5,35 @@
 
 ## 本轮交付的能力
 
+- 经过地址转换设备的连接检查：节点可配置 NAT（转换后地址 + 端口池），
+  同一条连接在路径不同位置呈现不同的源地址/端口。`POST /api/conncheck`
+  返回完整的**地址转换轨迹**（`natEvents`）：每次匹配采用的地址、所在
+  设备、转换决定（新建映射 / 命中映射 / 映射超时 / 端口被占用 /
+  无对应映射 / 转换池耗尽 / 范围已改变）及依据，去程、回程与迟到回程
+  分别标注。
+- 回程必须找到对应映射：回程包按完整四元组（转换后地址端口 + 对端
+  地址端口）匹配映射，**一个转换后的端口不会被认为是所有旧连接都可
+  复用**；对端不一致即无法确认，直接丢弃。
+- 迟到返回包的归属说明：连接空闲超时、转换范围改变（`natRanges`
+  试算）或端口被新连接重新使用后，迟到回程包说明为何属于旧连接或
+  为何无法确认（`late-return` 事件），**绝不放行到后来建立的另一条
+  连接**。
+- 已有连接沿用原转换，新连接重新选择：`keptMappings`（已有连接未
+  改动的映射）与 `newMappings`（本次新连接按最低可用端口确定性分配）
+  分别展示；两台主机争用同一映射池时先登记者保持、后来者取下一个
+  可用端口，池耗尽则新连接被拒绝（`nat-pool-exhausted`）。
+- 非对称返回经过不同设备不算可达：回程路径经过未参与去程转换的
+  NAT 设备时无映射可命中（`no-mapping`），明确标注不能凭去程已放行
+  认定回程路径有效。
+- 方案对比覆盖转换状态：`POST /api/conndiff` 的已有连接影响新增
+  `mappingStatus`（kept / invalidated-range / device-removed）——
+  转换范围调整或设备不再承担 NAT 时，即使路径仍放行，既有连接也判为
+  `broken-nat`；两段连续转换、两台主机争用映射、规则重排与中间设备
+  断开可组合试算，全部为纯计算，不修改草稿与任何已保存版本，未确认
+  的连接关系不影响其他方案。
+
+## 第二轮能力（保留）
+
 - 首次加载不再白屏：版本列表、差异报告等空集合在后端一律序列化为
   `[]`（曾为 `null` 导致前端 map 崩溃整页空白），前端再做一层防御性
   归一化；刷新可正常进入编辑。加载不到的资料在原位置说明——草稿恢复
@@ -112,9 +141,11 @@ cd ../backend && go run ./cmd/server -static ../frontend/dist
 - `POST /api/check`：body 含 `{topology?,source,target,maxPaths}`，返回
   `reachable`、`paths[]`、`blocked[]`，每条路径逐跳带规则轨迹。
 - `POST /api/conncheck`：body 含 `{topology?,source,target,maxPaths,
-  downNodes?,downLinks?,timeout?}`，返回连接生命周期四阶段（建立 /
-  保持 / 回程 / 失效）的逐跳解释与 `state`、`asymmetric`、
-  `bidirectional` 结论。
+  downNodes?,downLinks?,timeout?,srcPort?,dstPort?,existing?,
+  expiredConns?,natRanges?}`，返回连接生命周期四阶段（建立 / 保持 /
+  回程 / 失效）的逐跳解释、`state`、`asymmetric`、`bidirectional`
+  结论，以及地址转换轨迹 `natEvents`、新连接映射 `newMappings` 与
+  已有连接保留映射 `keptMappings`。
 - `POST /api/conndiff`：body 含 `{after, before? | beforeVersion,
   connections?, detailed}`，返回 `newConns`（新连接有序对差异）与
   `existing[]`（每条已有连接的保持/断开影响）。
@@ -125,6 +156,10 @@ cd ../backend && go run ./cmd/server -static ../frontend/dist
 ## 语义约定（供后续容量规划复用）
 
 - 版本快照不可变：容量规划引用 `version` 即可获得完全一致的拓扑与策略。
+- 节点 `nat` 块：`{enabled,address,portStart,portEnd}`，启用后该节点即
+  地址转换设备；主机地址取节点 `attrs.ip`（缺省回退为节点 ID）。
+- NAT 映射按完整四元组匹配：转换后地址端口 + 对端地址端口共同确认
+  回程包归属，端口复用只在旧映射失效后发生，且迟到包不会交给新连接。
 - 链路 `kind`：`directed`（仅 source→target）或 `undirected`（双向，
   反向经过时 hop 上标记 `reverse:true`）。
 - 默认动作建议保持 `deny`：没有显式放行的跳一律不通。

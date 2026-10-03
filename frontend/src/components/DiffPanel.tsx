@@ -165,7 +165,15 @@ export function DiffPanel() {
                 {report.existing.map((e) => (
                   <li key={e.connId} className={e.afterStatus === "survives" ? "now-ok" : "now-no"}>
                     <code>{e.connId}</code> {e.source} → {e.target}：
-                    {e.afterStatus === "survives" ? "保持" : e.afterStatus === "broken-path" ? "路径断开" : "策略拒绝"}
+                    {e.afterStatus === "survives"
+                      ? e.mappingStatus === "kept"
+                        ? "保持（沿用原转换）"
+                        : "保持"
+                      : e.afterStatus === "broken-path"
+                        ? "路径断开"
+                        : e.afterStatus === "broken-nat"
+                          ? "转换失效"
+                          : "策略拒绝"}
                     <div className="hint">{e.detail}</div>
                   </li>
                 ))}

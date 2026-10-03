@@ -53,7 +53,17 @@ export const api = {
     topology: Topology,
     source: string,
     target: string,
-    opts: { maxPaths?: number; downNodes?: string[]; downLinks?: string[]; timeout?: boolean } = {},
+    opts: {
+      maxPaths?: number;
+      downNodes?: string[];
+      downLinks?: string[];
+      timeout?: boolean;
+      srcPort?: number;
+      dstPort?: number;
+      existing?: Connection[];
+      expiredConns?: string[];
+      natRanges?: Record<string, [number, number]>;
+    } = {},
   ) =>
     req<ConnResult>("/api/conncheck", {
       method: "POST",

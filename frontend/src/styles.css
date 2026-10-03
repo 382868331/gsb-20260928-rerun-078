@@ -131,3 +131,35 @@ code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11p
 .conn-impact ul, .conn-list ul, .trial-list ul { list-style: none; padding-left: 0; }
 .conn-impact li, .conn-list li, .trial-list li { margin: 6px 0; font-size: 13px; }
 .path-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.nat-conf, .nat-trace {
+  margin-top: 8px;
+}
+.nat-trace table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.nat-trace th, .nat-trace td {
+  border: 1px solid #2a2f3a;
+  padding: 3px 6px;
+  text-align: left;
+}
+.nat-ok td {
+  color: #7bd88f;
+}
+.nat-bad td {
+  color: #ff7a7a;
+}
+.nat-maps {
+  display: flex;
+  gap: 24px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.nat-maps ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+input.port {
+  width: 72px;
+}

@@ -32,9 +32,15 @@ export function ConnPanel() {
   const [resultVersion, setResultVersion] = useState<number | null>(null);
   const [trials, setTrials] = useState<ConnTrial[]>([]);
   const [conns, setConns] = useState<Connection[]>([]);
+  const [srcPort, setSrcPort] = useState(49152);
+  const [dstPort, setDstPort] = useState(80);
+  const [expiredConns, setExpiredConns] = useState<string[]>([]);
+  const [natRanges, setNatRanges] = useState<Record<string, [number, number]>>({});
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const reqId = useRef(0);
+
+  const natDevices = topo.nodes.filter((n) => n.nat?.enabled);
 
   // Restore this version's registered connections and saved trials so
   // every explanation still matches its original topology, policy and
@@ -59,13 +65,22 @@ export function ConnPanel() {
     const id = ++reqId.current;
     try {
       const res = normalizeConnResult(
-        await api.connCheck(topo, src, dst, { maxPaths: 3, downNodes, downLinks, timeout: timeoutSim }),
+        await api.connCheck(topo, src, dst, {
+          maxPaths: 3, downNodes, downLinks, timeout: timeoutSim,
+          srcPort, dstPort,
+          existing: conns.filter((c) => (c.mappings?.length ?? 0) > 0),
+          expiredConns,
+          natRanges,
+        }),
       );
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
         setResult(res);
         setResultVersion(version);
-        const key = trialKey(src, dst, downNodes, downLinks, timeoutSim);
-        const trial: ConnTrial = { key, version, source: src, target: dst, downNodes, downLinks, timeout: timeoutSim, result: res };
+        const key = trialKey(src, dst, downNodes, downLinks, timeoutSim, srcPort, dstPort, expiredConns, natRanges);
+        const trial: ConnTrial = {
+          key, version, source: src, target: dst, downNodes, downLinks, timeout: timeoutSim,
+          srcPort, dstPort, expiredConns, natRanges, result: res,
+        };
         saveTrial(version, trial);
         setTrials(loadTrials(version));
       }
@@ -86,10 +101,19 @@ export function ConnPanel() {
       target: result.target,
       pathNodeIds: path ? path.nodeIds : undefined,
       state: "established",
+      srcAddr: addrOf(result.source),
+      srcPort,
+      dstAddr: addrOf(result.target),
+      dstPort,
+      mappings: result.newMappings,
     };
     const next = [...conns, conn];
     setConns(next);
     saveConnections(version, next);
+  }
+
+  function addrOf(id: string): string {
+    return topo.nodes.find((n) => n.id === id)?.attrs?.ip || id;
   }
 
   function unregister(id: string) {
@@ -104,6 +128,10 @@ export function ConnPanel() {
     setDownNodes(t.downNodes);
     setDownLinks(t.downLinks);
     setTimeoutSim(t.timeout);
+    setSrcPort(t.srcPort || 49152);
+    setDstPort(t.dstPort || 80);
+    setExpiredConns(t.expiredConns ?? []);
+    setNatRanges(t.natRanges ?? {});
     setResult(normalizeConnResult(t.result));
     setResultVersion(t.version);
   }
@@ -119,6 +147,20 @@ export function ConnPanel() {
     maintain: "保持（已建立连接 state=established）",
     return: "回程（state=return，方向反转）",
     teardown: "失效（超时 / 中间节点断开）",
+  };
+  const dirLabel: Record<string, string> = {
+    forward: "去程",
+    return: "回程",
+    "late-return": "迟到回程",
+  };
+  const decisionLabel: Record<string, string> = {
+    "new-mapping": "新建映射",
+    matched: "命中映射",
+    expired: "映射已超时",
+    "port-reused": "端口被新连接占用",
+    "no-mapping": "无对应映射",
+    "pool-exhausted": "转换池耗尽",
+    "range-changed": "转换范围已改变",
   };
 
   return (
@@ -140,10 +182,71 @@ export function ConnPanel() {
 
       <fieldset className="trial-conds">
         <legend>试算条件（不影响当前草稿与任何已保存方案）</legend>
+        <div className="cond-group">
+          <span>连接端口：</span>
+          <label className="inline">源端口
+            <input type="number" className="port" value={srcPort} onChange={(e) => setSrcPort(Number(e.target.value))} />
+          </label>
+          <label className="inline">宿端口
+            <input type="number" className="port" value={dstPort} onChange={(e) => setDstPort(Number(e.target.value))} />
+          </label>
+        </div>
         <label className="inline">
           <input type="checkbox" checked={timeoutSim} onChange={(e) => setTimeoutSim(e.target.checked)} />
           模拟连接空闲超时
         </label>
+        {conns.some((c) => (c.mappings?.length ?? 0) > 0) && (
+          <div className="cond-group">
+            <span>模拟已有连接映射超时：</span>
+            {conns.filter((c) => (c.mappings?.length ?? 0) > 0).map((c) => (
+              <label key={c.id} className="inline">
+                <input
+                  type="checkbox"
+                  checked={expiredConns.includes(c.id)}
+                  onChange={() => toggle(expiredConns, setExpiredConns, c.id)}
+                />
+                {c.id}（{c.source}→{c.target}）
+              </label>
+            ))}
+          </div>
+        )}
+        {natDevices.length > 0 && (
+          <div className="cond-group">
+            <span>模拟转换范围改变：</span>
+            {natDevices.map((n) => {
+              const ov = natRanges[n.id];
+              return (
+                <span key={n.id} className="inline">
+                  <label className="inline">
+                    <input
+                      type="checkbox"
+                      checked={!!ov}
+                      onChange={(e) => {
+                        const next = { ...natRanges };
+                        if (e.target.checked) next[n.id] = [n.nat!.portStart, n.nat!.portEnd];
+                        else delete next[n.id];
+                        setNatRanges(next);
+                      }}
+                    />
+                    {n.name || n.id}
+                  </label>
+                  {ov && (
+                    <>
+                      <input
+                        type="number" className="port" value={ov[0]}
+                        onChange={(e) => setNatRanges({ ...natRanges, [n.id]: [Number(e.target.value), ov[1]] })}
+                      />
+                      <input
+                        type="number" className="port" value={ov[1]}
+                        onChange={(e) => setNatRanges({ ...natRanges, [n.id]: [ov[0], Number(e.target.value)] })}
+                      />
+                    </>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
         <div className="cond-group">
           <span>断开中间节点：</span>
           {topo.nodes.map((n) => (
@@ -200,6 +303,48 @@ export function ConnPanel() {
               {ph.path && <PathView r={ph.path} />}
             </div>
           ))}
+          {result.natEvents.length > 0 && (
+            <div className="nat-trace">
+              <h4>地址转换轨迹（同一条连接在各设备前后的地址与端口）</h4>
+              <table>
+                <thead>
+                  <tr><th>方向</th><th>设备</th><th>转换前</th><th>转换后</th><th>决定</th><th>依据</th></tr>
+                </thead>
+                <tbody>
+                  {result.natEvents.map((ev, i) => (
+                    <tr key={i} className={ev.decision === "matched" || ev.decision === "new-mapping" ? "nat-ok" : "nat-bad"}>
+                      <td>{dirLabel[ev.direction] ?? ev.direction}</td>
+                      <td>{ev.device}</td>
+                      <td>{ev.preAddr}:{ev.prePort}</td>
+                      <td>{ev.postAddr ? `${ev.postAddr}:${ev.postPort}` : "—"}</td>
+                      <td>{decisionLabel[ev.decision] ?? ev.decision}</td>
+                      <td>{ev.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="nat-maps">
+                <div>
+                  <b>本次新连接选用的转换：</b>
+                  {result.newMappings.length === 0 && <span className="hint">（路径上没有地址转换设备）</span>}
+                  <ul>
+                    {result.newMappings.map((m, i) => (
+                      <li key={i}>{m.device}：{m.insideAddr}:{m.insidePort} → {m.natAddr}:{m.natPort}（对端 {m.peerAddr}:{m.peerPort}）</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <b>已有连接沿用原转换（未改动）：</b>
+                  {result.keptMappings.length === 0 && <span className="hint">（无）</span>}
+                  <ul>
+                    {result.keptMappings.map((m, i) => (
+                      <li key={i}>[{m.connId}] {m.device}：{m.insideAddr}:{m.insidePort} → {m.natAddr}:{m.natPort}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
           {result.establishable && (
             <button onClick={registerConnection}>将首条可行路径登记为已有连接（供方案对比评估影响）</button>
           )}
@@ -246,4 +391,3 @@ export function ConnPanel() {
     </div>
   );
 }
-

@@ -23,6 +23,17 @@ type ConnOptions struct {
 	DownNodes []string `json:"downNodes,omitempty"` // simulated disconnected middle nodes
 	DownLinks []string `json:"downLinks,omitempty"` // simulated disconnected links
 	Timeout   bool     `json:"timeout,omitempty"`   // simulate idle-timeout of the established connection
+	// Address translation trial inputs. SrcPort/DstPort identify the
+	// checked connection on the wire (defaults 49152 / 80). Existing
+	// carries the registered established connections whose mappings
+	// pre-populate the NAT tables; ExpiredConns flags which of them
+	// have idle-timed out; NATRanges overrides device port pools to
+	// trial a translation-range change. All of it is pure simulation.
+	SrcPort      int               `json:"srcPort,omitempty"`
+	DstPort      int               `json:"dstPort,omitempty"`
+	Existing     []Connection      `json:"existing,omitempty"`
+	ExpiredConns []string          `json:"expiredConns,omitempty"`
+	NATRanges    map[string][2]int `json:"natRanges,omitempty"`
 }
 
 // ConnPhase explains one lifecycle stage with its own hop-level trace.
@@ -47,6 +58,13 @@ type ConnResult struct {
 	Return        *PathResult `json:"return"`        // state=return, dst -> src
 	Phases        []ConnPhase `json:"phases"`
 	Reason        string      `json:"reason"`
+	// Address-translation trace: every NAT decision along the path
+	// (forward allocation, return lookup, late-return attribution),
+	// plus the mappings chosen for the checked connection and the
+	// existing connections' mappings that were left untouched.
+	NATEvents    []NATHopEvent `json:"natEvents"`
+	NewMappings  []NATMapping  `json:"newMappings"`
+	KeptMappings []NATMapping  `json:"keptMappings"`
 }
 
 // ConnCheck evaluates the connection lifecycle for src -> dst under
@@ -77,10 +95,52 @@ func (t *Topology) ConnCheck(src, dst string, k int, opts ConnOptions) (*ConnRes
 	res.Bidirectional = fwd.Reachable && ret.Reachable
 	res.Asymmetric = fwd.Reachable && !ret.Reachable
 
+	// Address translation layer: seed the NAT tables from the
+	// registered existing connections, allocate a deterministic
+	// mapping for the checked connection along its forward path, and
+	// require the return traffic to confirm one specific mapping per
+	// device. Everything happens on the filtered copy; the draft and
+	// saved versions are untouched.
+	nat := newNATSim(now, opts)
+	srcPort, dstPort := opts.SrcPort, opts.DstPort
+	if srcPort == 0 {
+		srcPort = 49152
+	}
+	if dstPort == 0 {
+		dstPort = 80
+	}
+	srcAddr, dstAddr := nodeAddr(now, src), nodeAddr(now, dst)
+	outerAddr, outerPort := srcAddr, srcPort
+	natFwdOK, natRetOK := true, true
+	if res.Establishable && len(fwd.Paths) > 0 {
+		var ok bool
+		outerAddr, outerPort, ok = nat.translateForward(now, fwd.Paths[0], srcAddr, srcPort, dstAddr, dstPort)
+		if !ok {
+			natFwdOK = false
+			res.Establishable = false
+		}
+	}
+	if opts.Timeout {
+		// The checked connection idle-timed out: its mappings expire
+		// before any late return packet arrives.
+		nat.expireCreated()
+	}
+	if ret.Reachable && len(ret.Paths) > 0 {
+		natRetOK = nat.translateReturn(now, ret.Paths[0], dstAddr, dstPort, outerAddr, outerPort)
+	}
+	nat.lateReturns()
+	res.NATEvents = nat.events
+	res.NewMappings = nat.created
+	res.KeptMappings = nat.kept
+
+	retOK := ret.Reachable && natRetOK
+	res.Bidirectional = res.Establishable && retOK
+	res.Asymmetric = res.Establishable && !retOK
+
 	res.Phases = append(res.Phases, ConnPhase{
-		Phase: "establish", OK: fwd.Reachable,
-		Reason: pickReason(fwd, "first-request-allowed"),
-		Detail: fmt.Sprintf("首次请求按新连接（state=new）逐跳评估：%s", zhVerdict(fwd)),
+		Phase: "establish", OK: res.Establishable,
+		Reason: establishReason(fwd, natFwdOK),
+		Detail: establishDetail(fwd, natFwdOK, nat),
 		Path:   fwd,
 	})
 
@@ -109,12 +169,15 @@ func (t *Topology) ConnCheck(src, dst string, k int, opts ConnOptions) (*ConnRes
 	}
 
 	retDetail := fmt.Sprintf("回程流量（state=return，%s → %s）逐跳评估：%s", dst, src, zhVerdict(ret))
+	if !natRetOK {
+		retDetail += "。地址转换校验未通过：" + natFailDetail(nat)
+	}
 	if res.Asymmetric {
 		retDetail += "。去程放行但回程不通：非对称返回路径，不能凭借一次放行认作全程可达"
 	}
 	res.Phases = append(res.Phases, ConnPhase{
-		Phase: "return", OK: ret.Reachable,
-		Reason: pickReason(ret, "return-allowed"),
+		Phase: "return", OK: retOK,
+		Reason: returnReason(ret, natRetOK, nat),
 		Detail: retDetail,
 		Path:   ret,
 	})
@@ -122,7 +185,50 @@ func (t *Topology) ConnCheck(src, dst string, k int, opts ConnOptions) (*ConnRes
 	res.Phases = append(res.Phases, t.teardownPhase(src, dst, opts))
 
 	res.State, res.Reason = res.connState(opts)
+	if !natFwdOK && res.State == "blocked" {
+		res.Reason = "nat-pool-exhausted"
+	}
 	return res, nil
+}
+
+func establishReason(fwd *PathResult, natOK bool) string {
+	if !natOK {
+		return "nat-pool-exhausted"
+	}
+	return pickReason(fwd, "first-request-allowed")
+}
+
+func establishDetail(fwd *PathResult, natOK bool, nat *natSim) string {
+	d := fmt.Sprintf("首次请求按新连接（state=new）逐跳评估：%s", zhVerdict(fwd))
+	if !natOK {
+		for _, ev := range nat.events {
+			if ev.Decision == "pool-exhausted" {
+				d += "。" + ev.Detail
+			}
+		}
+	}
+	return d
+}
+
+func returnReason(ret *PathResult, natOK bool, nat *natSim) string {
+	if !natOK {
+		for _, ev := range nat.events {
+			if ev.Direction == "return" && ev.Decision != "matched" {
+				return "nat-" + ev.Decision
+			}
+		}
+		return "nat-unconfirmed"
+	}
+	return pickReason(ret, "return-allowed")
+}
+
+func natFailDetail(nat *natSim) string {
+	for _, ev := range nat.events {
+		if ev.Direction == "return" && ev.Decision != "matched" {
+			return ev.Detail
+		}
+	}
+	return "回程包无法确认对应连接"
 }
 
 // teardownPhase explains why an established connection would break:
@@ -256,6 +362,14 @@ type Connection struct {
 	Target      string   `json:"target"`
 	PathNodeIDs []string `json:"pathNodeIds,omitempty"`
 	State       string   `json:"state"` // established
+	// Wire identity and the translation mappings this connection was
+	// established with; a change that invalidates them breaks the
+	// connection even when the path itself still passes.
+	SrcAddr  string       `json:"srcAddr,omitempty"`
+	SrcPort  int          `json:"srcPort,omitempty"`
+	DstAddr  string       `json:"dstAddr,omitempty"`
+	DstPort  int          `json:"dstPort,omitempty"`
+	Mappings []NATMapping `json:"mappings,omitempty"`
 }
 
 // ConnImpact explains what a policy/route change does to one existing
@@ -265,9 +379,14 @@ type ConnImpact struct {
 	Source       string `json:"source"`
 	Target       string `json:"target"`
 	BeforeStatus string `json:"beforeStatus"` // established
-	AfterStatus  string `json:"afterStatus"`  // survives | broken-path | broken-policy
+	AfterStatus  string `json:"afterStatus"`  // survives | broken-path | broken-policy | broken-nat
 	Detail       string `json:"detail"`
 	AfterHops    []Hop  `json:"afterHops"`
+	// MappingStatus reports whether the connection's original NAT
+	// mappings still hold under the after topology: kept |
+	// invalidated-range | device-removed. Existing connections keep
+	// their original translation; only new connections pick fresh ones.
+	MappingStatus string `json:"mappingStatus,omitempty"`
 }
 
 // ConnDiffReport separates the impact of a change: NewConns covers
@@ -350,7 +469,31 @@ func connImpact(before, after *Topology, aEng *engine, c Connection) ConnImpact 
 	}
 	imp.AfterStatus = "survives"
 	imp.Detail = "原路径各段在改动后仍放行（state=established），既有连接保持"
+	imp.MappingStatus, imp.AfterStatus, imp.Detail = mappingImpact(after, c, imp.AfterStatus, imp.Detail)
 	return imp
+}
+
+// mappingImpact checks every NAT mapping the existing connection was
+// established with against the after topology. The original
+// translation is the connection's identity: a device that lost its
+// NAT config or a pool that no longer covers the mapped port breaks
+// the connection's return traffic even when the path still passes.
+func mappingImpact(after *Topology, c Connection, status, detail string) (string, string, string) {
+	if len(c.Mappings) == 0 {
+		return "", status, detail
+	}
+	for _, m := range c.Mappings {
+		n := after.nodeByID(m.Device)
+		switch {
+		case n == nil || n.NAT == nil || !n.NAT.Enabled:
+			return "device-removed", "broken-nat",
+				fmt.Sprintf("转换设备 %s 在改动后不再承担地址转换，既有连接的原映射 %s:%d 无法沿用，回程无法确认", m.Device, m.NATAddr, m.NATPort)
+		case m.NATPort < n.NAT.PortStart || m.NATPort > n.NAT.PortEnd:
+			return "invalidated-range", "broken-nat",
+				fmt.Sprintf("设备 %s 的转换范围改为 %d-%d，既有连接的原映射端口 %d 不再可用，回程无法确认", m.Device, n.NAT.PortStart, n.NAT.PortEnd, m.NATPort)
+		}
+	}
+	return "kept", status, detail
 }
 
 // SortConnImpacts keeps a stable rendering order for saved reports.
