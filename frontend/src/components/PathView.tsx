@@ -15,6 +15,7 @@ export function PathView({ r, title }: { r: PathResult; title?: string }) {
           {paths.map((p, i) => (
             <div key={i} className="path">
               <div className="path-nodes">路径{i + 1}：{(p.nodeIds ?? []).join(" → ")}（{p.length} 跳）</div>
+              {p.detail && <div className="nat-decision nat-denied">{p.detail}</div>}
               <ol className="hops">
                 {(p.hops ?? []).map((h, j) => (
                   <li key={j}>
@@ -24,6 +25,18 @@ export function PathView({ r, title }: { r: PathResult; title?: string }) {
                     {h.ruleId
                       ? <>，命中规则 <code>{h.ruleId}</code>（顺序 {h.ruleOrder}）</>
                       : "，无规则命中 → 取默认动作"}
+                    {h.flow && (
+                      <div className="hop-flow">
+                        匹配地址：{formatAddress(h.flow.source)} → {formatAddress(h.flow.destination)}
+                        {h.flow.protocol ? `，${h.flow.protocol}` : ""}
+                      </div>
+                    )}
+                    {h.nat && (
+                      <div className={`nat-decision nat-${h.nat.decision}`}>
+                        转换：{natText(h.nat.action)} {h.nat.ruleId ? `规则 ${h.nat.ruleId}，` : ""}
+                        {h.nat.decision} — {h.nat.detail ?? formatAddress(h.nat.before) + " → " + formatAddress(h.nat.after)}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -37,6 +50,7 @@ export function PathView({ r, title }: { r: PathResult; title?: string }) {
           {blocked.map((p, i) => (
             <div key={i} className="path blocked-path">
               <div className="path-nodes">{(p.nodeIds ?? []).join(" → ")}</div>
+              {p.detail && <div className="nat-decision nat-denied">{p.detail}</div>}
               <ol className="hops">
                 {(p.hops ?? []).map((h, j) => (
                   <li key={j} className={h.action === "deny" ? "deny-hop" : ""}>
@@ -45,6 +59,7 @@ export function PathView({ r, title }: { r: PathResult; title?: string }) {
                     {h.ruleId
                       ? <>，规则 <code>{h.ruleId}</code>（顺序 {h.ruleOrder}）</>
                       : "，默认动作"}
+                    {h.nat && <div className={`nat-decision nat-${h.nat.decision}`}>{h.nat.detail}</div>}
                   </li>
                 ))}
               </ol>
@@ -59,6 +74,17 @@ export function PathView({ r, title }: { r: PathResult; title?: string }) {
   );
 }
 
+function formatAddress(a?: { ip?: string; port?: number }): string {
+  if (!a?.ip) return "—";
+  return `${a.ip}:${a.port ?? 0}`;
+}
+
+function natText(action: string): string {
+  if (action === "snat") return "源地址转换";
+  if (action === "un-snat") return "回程反向还原";
+  return action;
+}
+
 export function reasonText(reason: string): string {
   switch (reason) {
     case "allowed": return "存在策略全放行的路径";
@@ -68,4 +94,3 @@ export function reasonText(reason: string): string {
     default: return reason || "未知";
   }
 }
-

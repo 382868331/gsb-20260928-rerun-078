@@ -74,6 +74,9 @@ input[readonly] { background: #f1f5f9; color: #64748b; }
 .hops .allow { color: #16a34a; font-weight: 700; }
 .hops .deny { color: #dc2626; font-weight: 700; }
 .deny-hop { background: #fee2e2; border-radius: 3px; }
+.hop-flow, .nat-decision { margin-top: 2px; font-size: 11px; color: #475569; }
+.nat-decision { color: #1d4ed8; }
+.nat-denied { color: #b91c1c; font-weight: 600; }
 code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
 
 .baseline-row { display: flex; gap: 8px; }

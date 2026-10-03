@@ -22,6 +22,54 @@ export interface TopoLink {
   attrs?: Attrs;
 }
 
+export interface Address {
+  ip: string;
+  port: number;
+}
+
+export interface Packet {
+  connectionId?: string;
+  protocol?: string;
+  source: Address;
+  destination: Address;
+}
+
+export interface NATRule {
+  id: string;
+  device: string;
+  egressLinkId?: string;
+  order: number;
+  enabled: boolean;
+  matchSourceIp?: string;
+  translatedIp: string;
+  portStart: number;
+  portEnd: number;
+  preservePort?: boolean;
+}
+
+export interface NATBinding {
+  connectionId: string;
+  device: string;
+  ruleId: string;
+  protocol?: string;
+  original: Address;
+  translated: Address;
+  destination?: Address;
+  state?: string;
+}
+
+export interface NATDecision {
+  device: string;
+  ruleId?: string;
+  action: string;
+  before?: Address;
+  after?: Address;
+  decision: string;
+  reason?: string;
+  detail?: string;
+  binding?: NATBinding;
+}
+
 export interface Rule {
   id: string;
   order: number;
@@ -40,6 +88,10 @@ export interface Rule {
   dstAttrName?: string;
   dstAttrValue?: string;
   protocol?: string;
+  srcIp?: string;
+  dstIp?: string;
+  srcPort?: number;
+  dstPort?: number;
   note?: string;
 }
 
@@ -56,6 +108,7 @@ export interface Topology {
   nodes: TopoNode[];
   links: TopoLink[];
   policy: Policy;
+  natRules?: NATRule[];
 }
 
 export interface Hop {
@@ -66,6 +119,8 @@ export interface Hop {
   ruleId?: string;
   ruleOrder?: number;
   action: RuleAction;
+  flow?: Packet;
+  nat?: NATDecision;
 }
 
 export interface PathInfo {
@@ -73,6 +128,8 @@ export interface PathInfo {
   nodeIds: string[];
   reachable: boolean;
   length: number;
+  mappings?: NATBinding[];
+  detail?: string;
 }
 
 export interface PathResult {
@@ -150,6 +207,7 @@ export interface ConnResult {
   maintain: PathResult;
   return: PathResult;
   phases: ConnPhase[];
+  mappings?: NATBinding[];
   reason: string;
 }
 
@@ -158,6 +216,8 @@ export interface Connection {
   source: string;
   target: string;
   pathNodeIds?: string[];
+  mappings?: NATBinding[];
+  packet?: Packet;
   state: string;
 }
 
@@ -169,6 +229,7 @@ export interface ConnImpact {
   afterStatus: "survives" | "broken-path" | "broken-policy";
   detail: string;
   afterHops: Hop[];
+  mappings?: NATBinding[];
 }
 
 export interface ConnDiffReport {

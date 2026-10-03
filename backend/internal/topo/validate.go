@@ -61,5 +61,28 @@ func (t *Topology) Normalize() error {
 			return fmt.Errorf("rule %q references missing link %q", r.ID, r.LinkID)
 		}
 	}
+	natSeen := map[string]bool{}
+	for i := range t.NATRules {
+		r := &t.NATRules[i]
+		if r.ID == "" {
+			return fmt.Errorf("nat rule %d missing id", i)
+		}
+		if natSeen[r.ID] {
+			return fmt.Errorf("duplicate nat rule id %q", r.ID)
+		}
+		natSeen[r.ID] = true
+		if !seen[r.Device] {
+			return fmt.Errorf("nat rule %q references missing device %q", r.ID, r.Device)
+		}
+		if r.EgressLinkID != "" && !linkSeen[r.EgressLinkID] {
+			return fmt.Errorf("nat rule %q references missing link %q", r.ID, r.EgressLinkID)
+		}
+		if r.TranslatedIP == "" {
+			return fmt.Errorf("nat rule %q missing translatedIp", r.ID)
+		}
+		if r.PortStart <= 0 || r.PortEnd < r.PortStart {
+			return fmt.Errorf("nat rule %q has invalid port range", r.ID)
+		}
+	}
 	return nil
 }

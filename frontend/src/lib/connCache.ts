@@ -1,4 +1,4 @@
-import type { Connection, ConnResult } from "../types";
+import type { Connection, ConnResult, Packet } from "../types";
 
 // Connection-state trial results and registered established
 // connections are cached per saved version, so reopening the page
@@ -14,6 +14,7 @@ export interface ConnTrial {
   downNodes: string[];
   downLinks: string[];
   timeout: boolean;
+  packet?: Packet;
   result: ConnResult;
 }
 
@@ -52,10 +53,13 @@ function put(version: number, data: VersionConnData) {
   writeAll(all);
 }
 
-export function trialKey(source: string, target: string, downNodes: string[], downLinks: string[], timeout: boolean): string {
+export function trialKey(source: string, target: string, downNodes: string[], downLinks: string[], timeout: boolean, packet?: Packet): string {
   const n = [...downNodes].sort().join(",");
   const l = [...downLinks].sort().join(",");
-  return [source, target, "n:" + n, "l:" + l, timeout ? "t:1" : "t:0"].join("|");
+  const flow = packet
+    ? [packet.source.ip, packet.source.port, packet.destination.ip, packet.destination.port, packet.protocol ?? ""].join(":")
+    : "no-packet";
+  return [source, target, "n:" + n, "l:" + l, timeout ? "t:1" : "t:0", "f:" + flow].join("|");
 }
 
 export function loadConnections(version: number): Connection[] {
@@ -86,4 +90,3 @@ export function removeTrial(version: number, key: string) {
   if (d.trials) delete d.trials[key];
   put(version, d);
 }
-

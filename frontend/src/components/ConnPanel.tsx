@@ -28,6 +28,11 @@ export function ConnPanel() {
   const [timeoutSim, setTimeoutSim] = useState(false);
   const [downNodes, setDownNodes] = useState<string[]>([]);
   const [downLinks, setDownLinks] = useState<string[]>([]);
+  const [srcIP, setSrcIP] = useState("10.0.0.10");
+  const [srcPort, setSrcPort] = useState(40001);
+  const [dstIP, setDstIP] = useState("203.0.113.20");
+  const [dstPort, setDstPort] = useState(80);
+  const [protocol, setProtocol] = useState("tcp");
   const [result, setResult] = useState<ConnResult | null>(null);
   const [resultVersion, setResultVersion] = useState<number | null>(null);
   const [trials, setTrials] = useState<ConnTrial[]>([]);
@@ -59,13 +64,20 @@ export function ConnPanel() {
     const id = ++reqId.current;
     try {
       const res = normalizeConnResult(
-        await api.connCheck(topo, src, dst, { maxPaths: 3, downNodes, downLinks, timeout: timeoutSim }),
+        await api.connCheck(topo, src, dst, {
+          maxPaths: 3,
+          downNodes,
+          downLinks,
+          timeout: timeoutSim,
+          packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol },
+        }),
       );
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
         setResult(res);
         setResultVersion(version);
-        const key = trialKey(src, dst, downNodes, downLinks, timeoutSim);
-        const trial: ConnTrial = { key, version, source: src, target: dst, downNodes, downLinks, timeout: timeoutSim, result: res };
+        const packet = { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol };
+        const key = trialKey(src, dst, downNodes, downLinks, timeoutSim, packet);
+        const trial: ConnTrial = { key, version, source: src, target: dst, downNodes, downLinks, timeout: timeoutSim, packet, result: res };
         saveTrial(version, trial);
         setTrials(loadTrials(version));
       }
@@ -85,6 +97,8 @@ export function ConnPanel() {
       source: result.source,
       target: result.target,
       pathNodeIds: path ? path.nodeIds : undefined,
+      mappings: result.mappings ?? path?.mappings ?? [],
+      packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol, connectionId: result.mappings?.[0]?.connectionId },
       state: "established",
     };
     const next = [...conns, conn];
@@ -104,6 +118,13 @@ export function ConnPanel() {
     setDownNodes(t.downNodes);
     setDownLinks(t.downLinks);
     setTimeoutSim(t.timeout);
+    if (t.packet) {
+      setSrcIP(t.packet.source.ip);
+      setSrcPort(t.packet.source.port);
+      setDstIP(t.packet.destination.ip);
+      setDstPort(t.packet.destination.port);
+      setProtocol(t.packet.protocol ?? "tcp");
+   }
     setResult(normalizeConnResult(t.result));
     setResultVersion(t.version);
   }
@@ -139,7 +160,26 @@ export function ConnPanel() {
       </div>
 
       <fieldset className="trial-conds">
-        <legend>试算条件（不影响当前草稿与任何已保存方案）</legend>
+        <legend>报文与试算条件（不影响当前草稿与任何已保存方案）</legend>
+        <div className="row2">
+          <label>源地址:端口
+            <input value={srcIP} onChange={(e) => setSrcIP(e.target.value)} />
+          </label>
+          <label>源端口
+            <input type="number" value={srcPort} onChange={(e) => setSrcPort(Number(e.target.value))} />
+          </label>
+        </div>
+        <div className="row2">
+          <label>目标地址:端口
+            <input value={dstIP} onChange={(e) => setDstIP(e.target.value)} />
+          </label>
+          <label>目标端口
+            <input type="number" value={dstPort} onChange={(e) => setDstPort(Number(e.target.value))} />
+          </label>
+        </div>
+        <label>协议
+          <input value={protocol} onChange={(e) => setProtocol(e.target.value)} />
+        </label>
         <label className="inline">
           <input type="checkbox" checked={timeoutSim} onChange={(e) => setTimeoutSim(e.target.checked)} />
           模拟连接空闲超时
@@ -188,6 +228,16 @@ export function ConnPanel() {
             {result.source} → {result.target}：连接状态 = {stateLabel[result.state] ?? result.state}
             {result.asymmetric && (
               <span className="warn-tag">非对称返回：去程放行但回程不通，不能认作全程可达</span>
+            )}
+            {result.mappings && result.mappings.length > 0 && (
+              <div className="hint">
+                本连接建立的映射：
+                {result.mappings.map((m) => (
+                  <span key={`${m.device}-${m.ruleId}-${m.translated.port}`}>
+                    {` ${m.device}: ${m.original.ip}:${m.original.port} → ${m.translated.ip}:${m.translated.port}（规则 ${m.ruleId}）；`}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
           {result.phases.map((ph) => (
@@ -246,4 +296,3 @@ export function ConnPanel() {
     </div>
   );
 }
-

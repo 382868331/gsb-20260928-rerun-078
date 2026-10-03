@@ -27,6 +27,65 @@ type Link struct {
 	Attrs  map[string]string `json:"attrs,omitempty"`
 }
 
+// Address is an IP/port endpoint observed at one point on a path.
+type Address struct {
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+}
+
+func (a Address) String() string { return fmt.Sprintf("%s:%d", a.IP, a.Port) }
+
+// Packet is the connection five-tuple being checked. The connection ID
+// makes return traffic attributable to one concrete connection rather
+// than to whichever connection currently reuses a translated port.
+type Packet struct {
+	ConnectionID string  `json:"connectionId,omitempty"`
+	Protocol     string  `json:"protocol,omitempty"`
+	Source       Address `json:"source"`
+	Destination  Address `json:"destination"`
+}
+
+// NATRule performs source NAT when traffic leaves Device over
+// EgressLinkID. Existing mappings always follow their original rule;
+// new connections allocate from the current rule and port range.
+type NATRule struct {
+	ID            string `json:"id"`
+	Device        string `json:"device"`
+	EgressLinkID  string `json:"egressLinkId,omitempty"`
+	Order         int    `json:"order"`
+	Enabled       bool   `json:"enabled"`
+	MatchSourceIP string `json:"matchSourceIp,omitempty"`
+	TranslatedIP  string `json:"translatedIp"`
+	PortStart     int    `json:"portStart"`
+	PortEnd       int    `json:"portEnd"`
+	PreservePort  bool   `json:"preservePort,omitempty"`
+}
+
+// NATBinding is an immutable connection-tracked translation decision.
+type NATBinding struct {
+	ConnectionID string  `json:"connectionId"`
+	Device       string  `json:"device"`
+	RuleID       string  `json:"ruleId"`
+	Protocol     string  `json:"protocol,omitempty"`
+	Original     Address `json:"original"`
+	Translated   Address `json:"translated"`
+	Destination  Address `json:"destination,omitempty"`
+	State        string  `json:"state,omitempty"`
+}
+
+// NATDecision explains the translation attempted at a device.
+type NATDecision struct {
+	Device   string      `json:"device"`
+	RuleID   string      `json:"ruleId,omitempty"`
+	Action   string      `json:"action"` // snat | un-snat | none
+	Before   Address     `json:"before,omitempty"`
+	After    Address     `json:"after,omitempty"`
+	Decision string      `json:"decision"` // created | reused | confirmed | denied | unchanged
+	Reason   string      `json:"reason,omitempty"`
+	Detail   string      `json:"detail,omitempty"`
+	Binding  *NATBinding `json:"binding,omitempty"`
+}
+
 type RuleAction string
 
 const (
@@ -70,6 +129,10 @@ type Rule struct {
 	DstAttrValue  string     `json:"dstAttrValue,omitempty"`
 	Protocol      string     `json:"protocol,omitempty"`  // carried on link attrs, matched when set
 	ConnState     string     `json:"connState,omitempty"` // "", new, established, return
+	SrcIP         string     `json:"srcIp,omitempty"`
+	DstIP         string     `json:"dstIp,omitempty"`
+	SrcPort       int        `json:"srcPort,omitempty"`
+	DstPort       int        `json:"dstPort,omitempty"`
 	Note          string     `json:"note,omitempty"`
 }
 
@@ -79,28 +142,33 @@ type Policy struct {
 }
 
 type Topology struct {
-	Version int    `json:"version"` // incremented on every persisted save
-	Nodes   []Node `json:"nodes"`
-	Links   []Link `json:"links"`
-	Policy  Policy `json:"policy"`
+	Version  int       `json:"version"` // incremented on every persisted save
+	Nodes    []Node    `json:"nodes"`
+	Links    []Link    `json:"links"`
+	Policy   Policy    `json:"policy"`
+	NATRules []NATRule `json:"natRules,omitempty"`
 }
 
 // Hop describes one directed traversal in an evaluated path.
 type Hop struct {
-	From      string     `json:"from"`
-	To        string     `json:"to"`
-	LinkID    string     `json:"linkId"`
-	Reverse   bool       `json:"reverse"` // undirected link walked target -> source
-	RuleID    string     `json:"ruleId"`
-	RuleOrder int        `json:"ruleOrder"`
-	Action    RuleAction `json:"action"`
+	From      string       `json:"from"`
+	To        string       `json:"to"`
+	LinkID    string       `json:"linkId"`
+	Reverse   bool         `json:"reverse"` // undirected link walked target -> source
+	RuleID    string       `json:"ruleId"`
+	RuleOrder int          `json:"ruleOrder"`
+	Action    RuleAction   `json:"action"`
+	Flow      *Packet      `json:"flow,omitempty"`
+	NAT       *NATDecision `json:"nat,omitempty"`
 }
 
 type Path struct {
-	Hops      []Hop    `json:"hops"`
-	NodeIDs   []string `json:"nodeIds"`
-	Reachable bool     `json:"reachable"`
-	Length    int      `json:"length"`
+	Hops      []Hop        `json:"hops"`
+	NodeIDs   []string     `json:"nodeIds"`
+	Reachable bool         `json:"reachable"`
+	Length    int          `json:"length"`
+	Mappings  []NATBinding `json:"mappings,omitempty"`
+	Detail    string       `json:"detail,omitempty"`
 }
 
 // HopDecision is the outcome of evaluating the ordered rule list for one hop.
@@ -181,6 +249,12 @@ func (t *Topology) DecideHop(from, to, linkID string) HopDecision {
 // insertion position) and the first match wins. With no match the
 // policy default action applies.
 func (t *Topology) DecideHopState(from, to, linkID, state string) HopDecision {
+	return t.DecideHopStateFlow(from, to, linkID, state, Packet{})
+}
+
+// DecideHopStateFlow is DecideHopState with the addresses visible on
+// that hop. Address matchers intentionally observe post-NAT values.
+func (t *Topology) DecideHopStateFlow(from, to, linkID, state string, flow Packet) HopDecision {
 	fromNode := t.nodeByID(from)
 	toNode := t.nodeByID(to)
 	link := t.linkByID(linkID)
@@ -232,9 +306,24 @@ func (t *Topology) DecideHopState(from, to, linkID, state string) HopDecision {
 			if link != nil {
 				proto = link.Attrs["protocol"]
 			}
+			if flow.Protocol != "" {
+				proto = flow.Protocol
+			}
 			if proto != r.Protocol {
 				continue
 			}
+		}
+		if r.SrcIP != "" && !ipMatch(r.SrcIP, flow.Source.IP) {
+			continue
+		}
+		if r.DstIP != "" && !ipMatch(r.DstIP, flow.Destination.IP) {
+			continue
+		}
+		if r.SrcPort != 0 && r.SrcPort != flow.Source.Port {
+			continue
+		}
+		if r.DstPort != 0 && r.DstPort != flow.Destination.Port {
+			continue
 		}
 		return HopDecision{Allowed: r.Action == ActionAllow, RuleID: r.ID, RuleOrder: r.Order}
 	}

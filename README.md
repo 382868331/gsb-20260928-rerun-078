@@ -26,6 +26,17 @@
   链路，全部为纯计算，不修改草稿与任何已保存版本；不同流量阶段的试算
   结果按版本缓存（localStorage），重开后每段解释仍对应原拓扑、策略及
   连接状态，可比较规则重排、连接超时与中间节点断开的组合。
+- 地址转换后的连续连接追踪：拓扑可声明按顺序匹配的 `natRules`，新连接在
+  转换设备上建立带连接 ID 的不可变映射；路径逐跳展示规则实际匹配的源/宿
+  IP、端口、命中规则和 SNAT / 回程反向还原决定。多台转换设备的连续映射
+  分别记录，回程必须按同一连接依次反查，不能因前向已放行就默认有效。
+- 端口争用、超时与复用安全：活动连接占用的转换端口不会分配给其他主机；
+  连接超时后，迟到回程即使命中后来被新连接复用的端口，也会按
+  `mapping-expired` 明确拒绝，不能转发给端口的当前占用者。
+- 既有映射与新建映射分开评估：已有连接沿用建立时的规则 ID、转换地址和
+  端口依据；规则重排或转换端口范围改变后，新连接从当前规则选择，既有连接
+  只按原路径和原映射验证。映射证据随登记连接保存，未确认关系不会写入或
+  修改其他方案。
 
 ## 第一轮能力（保留）
 
@@ -112,9 +123,11 @@ cd ../backend && go run ./cmd/server -static ../frontend/dist
 - `POST /api/check`：body 含 `{topology?,source,target,maxPaths}`，返回
   `reachable`、`paths[]`、`blocked[]`，每条路径逐跳带规则轨迹。
 - `POST /api/conncheck`：body 含 `{topology?,source,target,maxPaths,
-  downNodes?,downLinks?,timeout?}`，返回连接生命周期四阶段（建立 /
-  保持 / 回程 / 失效）的逐跳解释与 `state`、`asymmetric`、
-  `bidirectional` 结论。
+  downNodes?,downLinks?,timeout?,packet?,bindings?}`。`packet` 提供
+  `connectionId/protocol/source(ip,port)/destination(ip,port)`，返回连接
+  生命周期四阶段（建立 / 保持 / 回程 / 失效）的逐跳解释、`mappings[]`、
+  每跳 `flow` 与 `nat` 决定，以及 `state`、`asymmetric`、`bidirectional`
+  结论。
 - `POST /api/conndiff`：body 含 `{after, before? | beforeVersion,
   connections?, detailed}`，返回 `newConns`（新连接有序对差异）与
   `existing[]`（每条已有连接的保持/断开影响）。

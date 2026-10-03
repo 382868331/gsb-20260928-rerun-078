@@ -1,4 +1,4 @@
-import type { ConnDiffReport, ConnResult, DiffReport, PathResult } from "../types";
+import type { ConnDiffReport, ConnResult, DiffReport, Packet, PathResult } from "../types";
 
 // Every array the UI maps over is guaranteed to exist, so a backend
 // response of paths:null / phases:null can never blank the page.
@@ -13,12 +13,22 @@ export function normalizePathResult(r: PathResult): PathResult {
 }
 
 function normalizePath(p: PathResult["paths"][number]): PathResult["paths"][number] {
-  return { ...p, hops: p.hops ?? [], nodeIds: p.nodeIds ?? [] };
+  return {
+    ...p,
+    hops: p.hops ?? [],
+    nodeIds: p.nodeIds ?? [],
+    mappings: p.mappings ?? [],
+  };
+}
+
+function normalizePacket(p?: Packet): Packet | undefined {
+  return p ? { ...p, source: { ...p.source }, destination: { ...p.destination } } : undefined;
 }
 
 export function normalizeConnResult(r: ConnResult): ConnResult {
   return {
     ...r,
+    mappings: r.mappings ?? [],
     forward: normalizePathResult(r.forward),
     maintain: normalizePathResult(r.maintain),
     return: normalizePathResult(r.return),
@@ -40,7 +50,10 @@ export function normalizeDiffReport(r: DiffReport): DiffReport {
 export function normalizeConnDiffReport(r: ConnDiffReport): ConnDiffReport {
   return {
     newConns: normalizeDiffReport(r.newConns),
-    existing: (r.existing ?? []).map((e) => ({ ...e, afterHops: e.afterHops ?? [] })),
+    existing: (r.existing ?? []).map((e) => ({
+      ...e,
+      afterHops: e.afterHops ?? [],
+      mappings: e.mappings ?? [],
+    })),
   };
 }
-

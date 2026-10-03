@@ -53,7 +53,14 @@ export const api = {
     topology: Topology,
     source: string,
     target: string,
-    opts: { maxPaths?: number; downNodes?: string[]; downLinks?: string[]; timeout?: boolean } = {},
+    opts: {
+      maxPaths?: number;
+      downNodes?: string[];
+      downLinks?: string[];
+      timeout?: boolean;
+      packet?: import("../types").Packet;
+      bindings?: import("../types").NATBinding[];
+    } = {},
   ) =>
     req<ConnResult>("/api/conncheck", {
       method: "POST",
