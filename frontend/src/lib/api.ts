@@ -12,6 +12,7 @@ export function normalizeTopology(t: Topology): Topology {
       defaultAction: t.policy?.defaultAction ?? "deny",
       rules: t.policy?.rules ?? [],
     },
+    natRules: t.natRules ?? [],
   };
 }
 
@@ -58,6 +59,7 @@ export const api = {
       downNodes?: string[];
       downLinks?: string[];
       timeout?: boolean;
+      existing?: boolean;
       packet?: import("../types").Packet;
       bindings?: import("../types").NATBinding[];
     } = {},

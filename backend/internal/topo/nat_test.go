@@ -132,6 +132,30 @@ func TestNATAsymmetricReturnThroughDifferentDeviceIsUnconfirmed(t *testing.T) {
 	}
 }
 
+func TestEstablishedConnectionCannotRerouteAroundOriginalNATDevice(t *testing.T) {
+	topology := natTopo()
+	topology.Links = append(topology.Links, Link{ID: "bypass", Source: "h1", Target: "s1", Kind: LinkUndirected})
+	topology = topology.filteredCopy([]string{"n1"}, nil)
+	binding := NATBinding{
+		ConnectionID: "c1", Device: "n1", RuleID: "nat1", RuleOrder: 1, Protocol: "tcp",
+		Original:    Address{IP: "10.0.0.10", Port: 40001},
+		Translated:  Address{IP: "198.51.100.1", Port: 2000},
+		Destination: Address{IP: "203.0.113.20", Port: 80},
+		State:       bindingEstablished,
+	}
+	pkt := natPacket("c1", 40001)
+	res, err := topology.FindPathsStatePacket("h1", "h2", 3, StateEstablished, pkt, []NATBinding{binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reachable {
+		t.Fatalf("existing connection cannot take a bypass that loses its mapping: %+v", res.Paths)
+	}
+	if !strings.Contains(res.Blocked[0].Detail, "n1") {
+		t.Fatalf("blocked explanation must name the original NAT device: %+v", res.Blocked)
+	}
+}
+
 func TestNATPortContentionDoesNotReuseAnotherConnection(t *testing.T) {
 	topo := natTopo()
 	active := NATBinding{
@@ -185,6 +209,50 @@ func TestNATExpiredOrReusedPortLateReturnIsDenied(t *testing.T) {
 	}
 	if denied == nil || denied.Reason != "mapping-expired" || !strings.Contains(denied.Detail, "新连接") {
 		t.Fatalf("must explain expired mapping and reused port risk: %+v", denied)
+	}
+}
+
+func TestConnTimeoutExpiresOnlyCurrentConnectionAndKeepsOtherMappingOccupied(t *testing.T) {
+	topology := natTopo()
+	current := NATBinding{
+		ConnectionID: "current", Device: "n1", RuleID: "nat1", RuleOrder: 1, Protocol: "tcp",
+		Original:    Address{IP: "10.0.0.10", Port: 40001},
+		Translated:  Address{IP: "198.51.100.1", Port: 2000},
+		Destination: Address{IP: "203.0.113.20", Port: 80},
+		State:       bindingEstablished,
+	}
+	other := NATBinding{
+		ConnectionID: "other", Device: "n1", RuleID: "nat1", RuleOrder: 1, Protocol: "tcp",
+		Original:    Address{IP: "10.0.0.20", Port: 40002},
+		Translated:  Address{IP: "198.51.100.1", Port: 2001},
+		Destination: Address{IP: "203.0.113.20", Port: 80},
+		State:       bindingEstablished,
+	}
+	pkt := natPacket("current", 40001)
+	res, err := topology.ConnCheck("h1", "h2", 1, ConnOptions{
+		Packet:   &pkt,
+		Bindings: []NATBinding{current, other},
+		Timeout:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Maintain.Reachable || res.Return.Reachable || res.State != "expired" {
+		t.Fatalf("timeout must invalidate the current connection only: %+v", res)
+	}
+	if len(res.Mappings) != 1 || res.Mappings[0].ConnectionID != "current" || res.Mappings[0].State != bindingEstablished {
+		t.Fatalf("result should preserve the current established evidence, got %+v", res.Mappings)
+	}
+	newPkt := natPacket("replacement", 40003)
+	newRes, err := topology.FindPathsStatePacket("h1", "h2", 1, StateNew, newPkt, []NATBinding{
+		{ConnectionID: "current", Device: "n1", Translated: Address{IP: "198.51.100.1", Port: 2000}, State: bindingExpired},
+		other,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !newRes.Reachable || newRes.Paths[0].Mappings[0].Translated.Port != 2000 {
+		t.Fatalf("expired current port may be reallocated while other mapping stays occupied: %+v", newRes)
 	}
 }
 

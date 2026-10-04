@@ -25,6 +25,20 @@ interface VersionConnData {
 
 const KEY = "topo-conns-v1";
 
+export function migrateVersionData(fromVersion: number, toVersion: number) {
+  if (!fromVersion || !toVersion || fromVersion === toVersion) return;
+  const all = readAll();
+  const from = all[String(fromVersion)];
+  if (!from) return;
+  const connections = [...(all[String(toVersion)]?.connections ?? []), ...(from.connections ?? [])];
+  const trials = { ...(all[String(toVersion)]?.trials ?? {}) };
+  Object.values(from.trials ?? {}).forEach((trial) => {
+    trials[trial.key] = { ...trial, version: toVersion };
+  });
+  all[String(toVersion)] = { connections, trials };
+  writeAll(all);
+}
+
 function readAll(): Record<string, VersionConnData> {
   try {
     return JSON.parse(localStorage.getItem(KEY) || "{}") as Record<string, VersionConnData>;
@@ -57,7 +71,7 @@ export function trialKey(source: string, target: string, downNodes: string[], do
   const n = [...downNodes].sort().join(",");
   const l = [...downLinks].sort().join(",");
   const flow = packet
-    ? [packet.source.ip, packet.source.port, packet.destination.ip, packet.destination.port, packet.protocol ?? ""].join(":")
+    ? [packet.connectionId ?? "auto", packet.source.ip, packet.source.port, packet.destination.ip, packet.destination.port, packet.protocol ?? ""].join(":")
     : "no-packet";
   return [source, target, "n:" + n, "l:" + l, timeout ? "t:1" : "t:0", "f:" + flow].join("|");
 }

@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"topoplan/internal/topo"
 )
 
 // TestVersionsNeverEmitsNull is the regression test for the first-load
@@ -77,6 +79,91 @@ func TestConnCheckEndpoint(t *testing.T) {
 	if draft["version"] != 0.0 {
 		t.Fatalf("trial must not change the draft: %v", draft)
 	}
+}
+
+func TestConnCheckEndpointPassesPacketAndOccupiedMappings(t *testing.T) {
+	_, h := newTestServer(t)
+	topology := twoGatewayContentionTopology()
+	firstReq := map[string]any{
+		"topology": topology, "source": "h1", "target": "server",
+		"packet": map[string]any{
+			"connectionId": "conn-1", "protocol": "tcp",
+			"source":      map[string]any{"ip": "10.0.0.10", "port": 40001},
+			"destination": map[string]any{"ip": "203.0.113.20", "port": 80},
+		},
+	}
+	var first topo.ConnResult
+	if code := do(t, h, "POST", "/api/conncheck", firstReq, &first); code != 200 {
+		t.Fatalf("first connection code=%d", code)
+	}
+	if !first.Bidirectional || len(first.Mappings) != 2 {
+		t.Fatalf("first connection should create two mappings and return validly: %+v", first)
+	}
+	if first.Mappings[0].RuleOrder != 1 || first.Mappings[1].RuleOrder != 2 {
+		t.Fatalf("mapping evidence must retain rule order: %+v", first.Mappings)
+	}
+
+	secondReq := map[string]any{
+		"topology": topology, "source": "h3", "target": "server",
+		"packet": map[string]any{
+			"connectionId": "conn-2", "protocol": "tcp",
+			"source":      map[string]any{"ip": "10.0.0.30", "port": 40002},
+			"destination": map[string]any{"ip": "203.0.113.20", "port": 80},
+		},
+		"bindings": first.Mappings,
+	}
+	var second topo.ConnResult
+	if code := do(t, h, "POST", "/api/conncheck", secondReq, &second); code != 200 {
+		t.Fatalf("second connection code=%d", code)
+	}
+	if second.Establishable || second.Bidirectional {
+		t.Fatalf("contending connection must not pass when every gateway has one occupied port: %+v", second)
+	}
+	if !hasNATReason(second.Forward, "port-exhausted") {
+		t.Fatalf("blocked candidate must explain occupied mapping port: %+v", second.Forward.Blocked)
+	}
+}
+
+func twoGatewayContentionTopology() map[string]any {
+	return map[string]any{
+		"nodes": []map[string]any{
+			{"id": "h1", "kind": "host"}, {"id": "h3", "kind": "host"},
+			{"id": "gw1", "kind": "nat"}, {"id": "gw2", "kind": "nat"},
+			{"id": "server", "kind": "host"},
+		},
+		"links": []map[string]any{
+			{"id": "h1-gw1", "source": "h1", "target": "gw1", "kind": "undirected"},
+			{"id": "h3-gw1", "source": "h3", "target": "gw1", "kind": "undirected"},
+			{"id": "gw1-gw2", "source": "gw1", "target": "gw2", "kind": "undirected"},
+			{"id": "gw2-server", "source": "gw2", "target": "server", "kind": "undirected"},
+		},
+		"natRules": []map[string]any{
+			{"id": "nat1", "device": "gw1", "egressLinkId": "gw1-gw2", "order": 1, "enabled": true, "matchSourceIp": "10.0.0.0/24", "translatedIp": "198.51.100.1", "portStart": 2000, "portEnd": 2000},
+			{"id": "nat2", "device": "gw2", "egressLinkId": "gw2-server", "order": 2, "enabled": true, "matchSourceIp": "198.51.100.1", "translatedIp": "203.0.113.1", "portStart": 4000, "portEnd": 4000},
+		},
+		"policy": map[string]any{
+			"defaultAction": "deny",
+			"rules": []map[string]any{
+				{"id": "new", "order": 1, "enabled": true, "action": "allow", "connState": "new"},
+				{"id": "established", "order": 2, "enabled": true, "action": "allow", "connState": "established"},
+				{"id": "return", "order": 3, "enabled": true, "action": "allow", "connState": "return"},
+			},
+		},
+	}
+}
+
+func hasNATReason(r *topo.PathResult, reason string) bool {
+	if r == nil {
+		return false
+	}
+	for _, p := range r.Blocked {
+		for _, h := range p.Hops {
+			if h.NAT != nil && h.NAT.Reason == reason {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestConnDiffEndpointSeparatesNewAndExisting(t *testing.T) {

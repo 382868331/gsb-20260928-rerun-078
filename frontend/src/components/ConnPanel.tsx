@@ -13,7 +13,7 @@ import { normalizeConnResult } from "../lib/normalize";
 import { uid } from "../lib/id";
 import { PathView } from "./PathView";
 import { useTopoStore } from "../state/topoStore";
-import type { ConnResult, Connection } from "../types";
+import type { ConnResult, Connection, NATBinding, Packet } from "../types";
 
 // ConnPanel runs connection-state-aware what-if trials: first request
 // (state=new), keep-alive of an established connection
@@ -37,6 +37,7 @@ export function ConnPanel() {
   const [resultVersion, setResultVersion] = useState<number | null>(null);
   const [trials, setTrials] = useState<ConnTrial[]>([]);
   const [conns, setConns] = useState<Connection[]>([]);
+  const [activeConnId, setActiveConnId] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const reqId = useRef(0);
@@ -53,6 +54,23 @@ export function ConnPanel() {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   }
 
+  function currentPacket(): Packet {
+    return {
+      source: { ip: srcIP, port: srcPort },
+      destination: { ip: dstIP, port: dstPort },
+      protocol,
+      ...(activeConnId ? { connectionId: activeConnId } : {}),
+    };
+  }
+
+  function occupiedBindings(): NATBinding[] {
+    return conns.flatMap((c) =>
+      (c.mappings ?? [])
+        .filter((m) => !m.state || m.state === "established" || activeConnId === m.connectionId)
+        .map((m) => ({ ...m, state: m.state ?? "established" })),
+    );
+  }
+
   async function run() {
     if (!src || !dst) {
       setErr("请选择源和宿");
@@ -63,19 +81,22 @@ export function ConnPanel() {
     const seq = useTopoStore.getState().editSeq;
     const id = ++reqId.current;
     try {
+      const packet = currentPacket();
+      const bindings = occupiedBindings();
       const res = normalizeConnResult(
         await api.connCheck(topo, src, dst, {
           maxPaths: 3,
           downNodes,
           downLinks,
           timeout: timeoutSim,
-          packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol },
+          existing: activeConnId !== null,
+          packet,
+          bindings,
         }),
       );
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
         setResult(res);
         setResultVersion(version);
-        const packet = { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol };
         const key = trialKey(src, dst, downNodes, downLinks, timeoutSim, packet);
         const trial: ConnTrial = { key, version, source: src, target: dst, downNodes, downLinks, timeout: timeoutSim, packet, result: res };
         saveTrial(version, trial);
@@ -98,21 +119,56 @@ export function ConnPanel() {
       target: result.target,
       pathNodeIds: path ? path.nodeIds : undefined,
       mappings: result.mappings ?? path?.mappings ?? [],
-      packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol, connectionId: result.mappings?.[0]?.connectionId },
+      packet: { ...currentPacket(), connectionId: result.mappings?.[0]?.connectionId },
       state: "established",
     };
     const next = [...conns, conn];
     setConns(next);
     saveConnections(version, next);
+    setActiveConnId(null);
   }
 
   function unregister(id: string) {
+    const removed = conns.find((c) => c.id === id);
     const next = conns.filter((c) => c.id !== id);
+    setConns(next);
+    saveConnections(version, next);
+    if (removed?.packet?.connectionId === activeConnId) setActiveConnId(null);
+  }
+
+  function loadConnection(c: Connection) {
+    setActiveConnId(c.packet?.connectionId ?? null);
+    setSrc(c.source);
+    setDst(c.target);
+    setDownNodes([]);
+    setDownLinks([]);
+    setTimeoutSim(c.state === "expired");
+    if (c.packet) {
+      setSrcIP(c.packet.source.ip);
+      setSrcPort(c.packet.source.port);
+      setDstIP(c.packet.destination.ip);
+      setDstPort(c.packet.destination.port);
+      setProtocol(c.packet.protocol ?? "tcp");
+    }
+    setResult(null);
+    setResultVersion(version);
+  }
+
+  function markExpired(id: string) {
+    const next = conns.map((c) => {
+      if (c.id !== id) return c;
+      return {
+        ...c,
+        state: "expired",
+        mappings: (c.mappings ?? []).map((m) => ({ ...m, state: "expired" })),
+      };
+    });
     setConns(next);
     saveConnections(version, next);
   }
 
   function loadTrial(t: ConnTrial) {
+    setActiveConnId(t.packet?.connectionId ?? null);
     setSrc(t.source);
     setDst(t.target);
     setDownNodes(t.downNodes);
@@ -215,6 +271,7 @@ export function ConnPanel() {
       <button className="primary" disabled={busy} onClick={run}>
         {busy ? "计算中…" : "运行连接状态试算"}
       </button>
+      {activeConnId && <button onClick={() => setActiveConnId(null)}>改按新连接试算</button>}
       {err && <div className="error">{err}</div>}
 
       {result && (
@@ -233,7 +290,7 @@ export function ConnPanel() {
               <div className="hint">
                 本连接建立的映射：
                 {result.mappings.map((m) => (
-                  <span key={`${m.device}-${m.ruleId}-${m.translated.port}`}>
+                  <span key={m.device + "-" + m.ruleId + "-" + m.translated.port}>
                     {` ${m.device}: ${m.original.ip}:${m.original.port} → ${m.translated.ip}:${m.translated.port}（规则 ${m.ruleId}）；`}
                   </span>
                 ))}
@@ -262,8 +319,10 @@ export function ConnPanel() {
           <ul>
             {conns.map((c) => (
               <li key={c.id}>
-                <code>{c.id}</code> {c.source} → {c.target}
+                <code>{c.id}</code> {c.source} → {c.target}（{stateLabel[c.state] ?? c.state}）
                 {c.pathNodeIds && <span className="hint">（路径：{c.pathNodeIds.join(" → ")}）</span>}
+                <button onClick={() => loadConnection(c)}>试算此连接</button>
+                {c.state !== "expired" && <button onClick={() => markExpired(c.id)}>登记超时</button>}
                 <button onClick={() => unregister(c.id)}>移除</button>
               </li>
             ))}

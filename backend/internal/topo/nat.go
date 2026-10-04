@@ -39,8 +39,11 @@ func (t *Topology) FindPathsStatePacket(src, dst string, k int, state string, pk
 	}
 	for _, cand := range yen(eng, src, dst, k*4) {
 		p := t.evaluatePathPacket(eng, cand, state, pkt, bindings)
+		if state == StateEstablished {
+			p.Detail = requireConnectionBindings(&p, pkt.ConnectionID, bindings, state)
+		}
 		if state == StateReturn {
-			p.Detail = requireReturnBindings(&p, pkt.ConnectionID, bindings)
+			p.Detail = requireConnectionBindings(&p, pkt.ConnectionID, bindings, state)
 		}
 		if p.Reachable {
 			res.Paths = append(res.Paths, p)
@@ -142,9 +145,17 @@ func (t *Topology) applyForwardBinding(device, linkID, state string, pkt *Packet
 	if err != nil {
 		return &NATDecision{Device: device, RuleID: rule.ID, Action: "snat", Decision: "denied", Reason: "port-exhausted", Detail: err.Error(), Before: pkt.Source}
 	}
-	b := NATBinding{ConnectionID: pkt.ConnectionID, Device: device, RuleID: rule.ID, Protocol: pkt.Protocol, Original: pkt.Source, Translated: Address{IP: rule.TranslatedIP, Port: port}, Destination: pkt.Destination, State: bindingEstablished}
+	b := NATBinding{ConnectionID: pkt.ConnectionID, Device: device, RuleID: rule.ID, RuleOrder: rule.Order, Protocol: pkt.Protocol, Original: pkt.Source, Translated: Address{IP: rule.TranslatedIP, Port: port}, Destination: pkt.Destination, State: bindingEstablished}
 	pkt.Source = b.Translated
-	return &NATDecision{Device: device, RuleID: rule.ID, Action: "snat", Before: b.Original, After: b.Translated, Decision: "created", Detail: fmt.Sprintf("规则 %s 建立新映射：%s → %s", rule.ID, b.Original, b.Translated), Binding: &b}
+	match := rule.MatchSourceIP
+	if match == "" {
+		match = "任意源地址"
+	}
+	egress := rule.EgressLinkID
+	if egress == "" {
+		egress = "任意出链路"
+	}
+	return &NATDecision{Device: device, RuleID: rule.ID, RuleOrder: rule.Order, Action: "snat", Before: b.Original, After: b.Translated, Decision: "created", Detail: fmt.Sprintf("按顺序 %d 的规则 %s（出链路 %s，源地址匹配 %s）建立新映射：%s → %s", rule.Order, rule.ID, egress, match, b.Original, b.Translated), Binding: &b}
 }
 
 func (t *Topology) applyReturnBinding(device string, pkt *Packet, connID string, external []NATBinding, created map[string]NATBinding) *NATDecision {
@@ -163,17 +174,17 @@ func (t *Topology) applyReturnBinding(device string, pkt *Packet, connID string,
 	}
 	before := pkt.Destination
 	pkt.Destination = b.Original
-	return &NATDecision{Device: device, RuleID: b.RuleID, Action: "un-snat", Before: before, After: b.Original, Decision: "confirmed", Detail: fmt.Sprintf("按连接 %s 的原映射反向还原：%s → %s", connID, before, b.Original), Binding: &b}
+	return &NATDecision{Device: device, RuleID: b.RuleID, RuleOrder: b.RuleOrder, Action: "un-snat", Before: before, After: b.Original, Decision: "confirmed", Detail: fmt.Sprintf("回程目标 %s 与连接 %s 在设备 %s 登记的转换端点完全一致，按原映射（规则 %s，顺序 %d）反向还原：%s → %s", before, connID, device, b.RuleID, b.RuleOrder, before, b.Original), Binding: &b}
 }
 
 func bindingDecision(device, action, decision string, pkt *Packet, b NATBinding) *NATDecision {
 	before := pkt.Source
 	pkt.Source = b.Translated
-	return &NATDecision{Device: device, RuleID: b.RuleID, Action: action, Before: before, After: b.Translated, Decision: decision, Detail: fmt.Sprintf("沿用连接 %s 建立时的原映射：%s → %s", b.ConnectionID, before, b.Translated), Binding: &b}
+	return &NATDecision{Device: device, RuleID: b.RuleID, RuleOrder: b.RuleOrder, Action: action, Before: before, After: b.Translated, Decision: decision, Detail: fmt.Sprintf("沿用连接 %s 建立时的原映射（规则 %s，顺序 %d）：%s → %s", b.ConnectionID, b.RuleID, b.RuleOrder, before, b.Translated), Binding: &b}
 }
 
 func denyBinding(device, action string, b NATBinding, reason, detail string, pkt *Packet) *NATDecision {
-	return &NATDecision{Device: device, RuleID: b.RuleID, Action: action, Before: pkt.Source, Decision: "denied", Reason: reason, Detail: detail, Binding: &b}
+	return &NATDecision{Device: device, RuleID: b.RuleID, RuleOrder: b.RuleOrder, Action: action, Before: pkt.Source, Decision: "denied", Reason: reason, Detail: detail, Binding: &b}
 }
 
 func findBinding(bindings []NATBinding, device, connID string, translated Address) (NATBinding, bool) {
@@ -185,7 +196,7 @@ func findBinding(bindings []NATBinding, device, connID string, translated Addres
 	return NATBinding{}, false
 }
 
-func requireReturnBindings(p *Path, connID string, bindings []NATBinding) string {
+func requireConnectionBindings(p *Path, connID string, bindings []NATBinding, state string) string {
 	nodes := map[string]bool{}
 	for _, id := range p.NodeIDs {
 		nodes[id] = true
@@ -202,7 +213,10 @@ func requireReturnBindings(p *Path, connID string, bindings []NATBinding) string
 	}
 	if len(missing) > 0 {
 		p.Reachable = false
-		return "回程路径未经过原连接的转换设备 " + strings.Join(missing, "、") + "，不能凭借去程已放行认定该非对称回程有效"
+		if state == StateReturn {
+			return "回程路径未经过原连接的转换设备 " + strings.Join(missing, "、") + "，不能凭借去程已放行认定该非对称回程有效"
+		}
+		return "既有连接路径未经过建立时的转换设备 " + strings.Join(missing, "、") + "，不能在重路由后的新路径上借用其他映射"
 	}
 	return ""
 }

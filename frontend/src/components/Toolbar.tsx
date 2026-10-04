@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { api, normalizeTopology } from "../lib/api";
+import { migrateVersionData } from "../lib/connCache";
 import { useTopoStore } from "../state/topoStore";
 import type { Topology } from "../types";
 
@@ -27,7 +28,9 @@ export function Toolbar({ linkMode, setLinkMode, setLinkStart }: Props) {
     try {
       const label = prompt("保存标签（版本备注）", `编辑于 ${new Date().toLocaleString()}`);
       if (label === null) return;
+      const previousVersion = topo.version;
       const snap = await api.save(topo, label);
+      migrateVersionData(previousVersion, snap.meta.version);
       // The snapshot comes back with its assigned version; loading it
       // as a clean snapshot keeps the draft and the saved version in
       // lockstep, so a later refresh restores exactly this state.

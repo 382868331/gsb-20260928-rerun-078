@@ -51,6 +51,7 @@ export interface NATBinding {
   connectionId: string;
   device: string;
   ruleId: string;
+  ruleOrder?: number;
   protocol?: string;
   original: Address;
   translated: Address;
@@ -61,6 +62,7 @@ export interface NATBinding {
 export interface NATDecision {
   device: string;
   ruleId?: string;
+  ruleOrder?: number;
   action: string;
   before?: Address;
   after?: Address;

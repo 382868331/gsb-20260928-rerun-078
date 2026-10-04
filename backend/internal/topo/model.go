@@ -66,6 +66,7 @@ type NATBinding struct {
 	ConnectionID string  `json:"connectionId"`
 	Device       string  `json:"device"`
 	RuleID       string  `json:"ruleId"`
+	RuleOrder    int     `json:"ruleOrder,omitempty"`
 	Protocol     string  `json:"protocol,omitempty"`
 	Original     Address `json:"original"`
 	Translated   Address `json:"translated"`
@@ -75,15 +76,16 @@ type NATBinding struct {
 
 // NATDecision explains the translation attempted at a device.
 type NATDecision struct {
-	Device   string      `json:"device"`
-	RuleID   string      `json:"ruleId,omitempty"`
-	Action   string      `json:"action"` // snat | un-snat | none
-	Before   Address     `json:"before,omitempty"`
-	After    Address     `json:"after,omitempty"`
-	Decision string      `json:"decision"` // created | reused | confirmed | denied | unchanged
-	Reason   string      `json:"reason,omitempty"`
-	Detail   string      `json:"detail,omitempty"`
-	Binding  *NATBinding `json:"binding,omitempty"`
+	Device    string      `json:"device"`
+	RuleID    string      `json:"ruleId,omitempty"`
+	RuleOrder int         `json:"ruleOrder,omitempty"`
+	Action    string      `json:"action"` // snat | un-snat | none
+	Before    Address     `json:"before,omitempty"`
+	After     Address     `json:"after,omitempty"`
+	Decision  string      `json:"decision"` // created | reused | confirmed | denied | unchanged
+	Reason    string      `json:"reason,omitempty"`
+	Detail    string      `json:"detail,omitempty"`
+	Binding   *NATBinding `json:"binding,omitempty"`
 }
 
 type RuleAction string

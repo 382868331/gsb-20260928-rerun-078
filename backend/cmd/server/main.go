@@ -289,13 +289,16 @@ func deepClone(t *topo.Topology) *topo.Topology {
 func errMissing(field string) error { return &fieldError{field} }
 
 type connCheckReq struct {
-	Topology  *topo.Topology `json:"topology,omitempty"`
-	Source    string         `json:"source"`
-	Target    string         `json:"target"`
-	MaxPaths  int            `json:"maxPaths"`
-	DownNodes []string       `json:"downNodes,omitempty"`
-	DownLinks []string       `json:"downLinks,omitempty"`
-	Timeout   bool           `json:"timeout,omitempty"`
+	Topology  *topo.Topology    `json:"topology,omitempty"`
+	Source    string            `json:"source"`
+	Target    string            `json:"target"`
+	MaxPaths  int               `json:"maxPaths"`
+	DownNodes []string          `json:"downNodes,omitempty"`
+	DownLinks []string          `json:"downLinks,omitempty"`
+	Timeout   bool              `json:"timeout,omitempty"`
+	Packet    *topo.Packet      `json:"packet,omitempty"`
+	Bindings  []topo.NATBinding `json:"bindings,omitempty"`
+	Existing  bool              `json:"existing,omitempty"`
 }
 
 // connCheck evaluates the connection lifecycle (establish / maintain /
@@ -322,6 +325,9 @@ func (s *server) connCheck(w http.ResponseWriter, r *http.Request) {
 		DownNodes: req.DownNodes,
 		DownLinks: req.DownLinks,
 		Timeout:   req.Timeout,
+		Packet:    req.Packet,
+		Bindings:  req.Bindings,
+		Existing:  req.Existing,
 	})
 	if err != nil {
 		writeErr(w, 400, err)

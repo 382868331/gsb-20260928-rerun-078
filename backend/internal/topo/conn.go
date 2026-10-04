@@ -25,6 +25,7 @@ type ConnOptions struct {
 	Timeout   bool         `json:"timeout,omitempty"`   // simulate idle-timeout of the established connection
 	Packet    *Packet      `json:"packet,omitempty"`
 	Bindings  []NATBinding `json:"bindings,omitempty"`
+	Existing  bool         `json:"existing,omitempty"`
 }
 
 // ConnPhase explains one lifecycle stage with its own hop-level trace.
@@ -75,18 +76,22 @@ func (t *Topology) ConnCheck(src, dst string, k int, opts ConnOptions) (*ConnRes
 	var fwd *PathResult
 	var err error
 	if opts.Packet != nil {
-		fwd, err = now.FindPathsStatePacket(src, dst, k, StateNew, fwdPkt, bindings)
+		forwardState := StateNew
+		if opts.Existing {
+			forwardState = StateEstablished
+		}
+		fwd, err = now.FindPathsStatePacket(src, dst, k, forwardState, fwdPkt, bindings)
 	} else {
 		fwd, err = now.FindPathsState(src, dst, k, StateNew)
 	}
 	if err != nil {
 		return nil, err
 	}
-	establishedBindings := bindingsForResult(fwd, bindings)
+	establishedBindings := bindingsForResult(fwd, bindings, fwdPkt.ConnectionID, opts.Timeout)
 	res.Mappings = append([]NATBinding{}, establishedBindings...)
 	maintainBindings := establishedBindings
 	if opts.Timeout {
-		maintainBindings = expireBindings(establishedBindings)
+		maintainBindings = expireBindings(maintainBindings, fwdPkt.ConnectionID)
 	}
 	var maintain *PathResult
 	if opts.Packet != nil {
@@ -115,7 +120,7 @@ func (t *Topology) ConnCheck(src, dst string, k int, opts ConnOptions) (*ConnRes
 	res.Phases = append(res.Phases, ConnPhase{
 		Phase: "establish", OK: fwd.Reachable,
 		Reason: pickReason(fwd, "first-request-allowed"),
-		Detail: fmt.Sprintf("首次请求按新连接（state=new）逐跳评估：%s", zhVerdict(fwd)),
+		Detail: forwardPhaseDetail(fwd, opts.Existing),
 		Path:   fwd,
 	})
 
@@ -162,6 +167,13 @@ func (t *Topology) ConnCheck(src, dst string, k int, opts ConnOptions) (*ConnRes
 
 	res.State, res.Reason = res.connState(opts)
 	return res, nil
+}
+
+func forwardPhaseDetail(r *PathResult, existing bool) string {
+	if existing {
+		return fmt.Sprintf("已有连接按建立时连接 ID 与映射（state=established）逐跳验证：%s；可行路径必须经过其全部原转换设备", zhVerdict(r))
+	}
+	return fmt.Sprintf("首次请求按新连接（state=new）逐跳评估：%s", zhVerdict(r))
 }
 
 // teardownPhase explains why an established connection would break:
@@ -294,18 +306,55 @@ func joinZH(parts []string) string {
 	return out
 }
 
-func bindingsForResult(r *PathResult, supplied []NATBinding) []NATBinding {
-	if r == nil || !r.Reachable || len(r.Paths) == 0 {
-		return append([]NATBinding{}, supplied...)
+func bindingsForResult(r *PathResult, supplied []NATBinding, connID string, timeout bool) []NATBinding {
+	onPath := map[string]bool{}
+	if r != nil && len(r.Paths) > 0 {
+		onPath = map[string]bool{}
+		for _, id := range r.Paths[0].NodeIDs {
+			onPath[id] = true
+		}
 	}
-	return append([]NATBinding{}, r.Paths[0].Mappings...)
+	var out []NATBinding
+	if !timeout && r != nil && r.Reachable && len(r.Paths) > 0 {
+		out = append(out, r.Paths[0].Mappings...)
+	} else {
+		for _, b := range supplied {
+			if b.ConnectionID != connID || b.State == bindingExpired {
+				continue
+			}
+			if len(onPath) > 0 && !onPath[b.Device] {
+				continue
+			}
+			out = append(out, b)
+		}
+	}
+	if len(out) == 0 && r != nil && r.Reachable && len(r.Paths) > 0 {
+		out = append(out, r.Paths[0].Mappings...)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, b := range out {
+		seen[b.Device] = true
+	}
+	for _, b := range supplied {
+		if b.ConnectionID != connID || b.State == bindingExpired || seen[b.Device] || !onPath[b.Device] {
+			continue
+		}
+		out = append(out, b)
+		seen[b.Device] = true
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Device < out[j].Device })
+	return out
 }
 
-func expireBindings(in []NATBinding) []NATBinding {
-	out := make([]NATBinding, len(in))
-	for i, b := range in {
-		b.State = bindingExpired
-		out[i] = b
+func expireBindings(in []NATBinding, connID string) []NATBinding {
+	out := append([]NATBinding{}, in...)
+	for i := range out {
+		if out[i].ConnectionID == connID {
+			out[i].State = bindingExpired
+		}
 	}
 	return out
 }
