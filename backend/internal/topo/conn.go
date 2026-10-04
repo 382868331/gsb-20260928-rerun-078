@@ -295,8 +295,9 @@ func joinZH(parts []string) string {
 }
 
 func bindingsForResult(r *PathResult, supplied []NATBinding) []NATBinding {
+	// Only the mappings this trial established belong in the result;
 	if r == nil || !r.Reachable || len(r.Paths) == 0 {
-		return append([]NATBinding{}, supplied...)
+		return []NATBinding{}
 	}
 	return append([]NATBinding{}, r.Paths[0].Mappings...)
 }

@@ -62,6 +62,12 @@ export function ConnPanel() {
     setBusy(true);
     const seq = useTopoStore.getState().editSeq;
     const id = ++reqId.current;
+    const packet = { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol };
+    // Every mapping owned by another registered connection on this
+    // version is an occupied translation port: a new connection must
+    // allocate around it, and return traffic is only unwound when it
+    // belongs to the connection that owns the mapping.
+    const bindings = conns.flatMap((c) => c.mappings ?? []);
     try {
       const res = normalizeConnResult(
         await api.connCheck(topo, src, dst, {
@@ -69,13 +75,13 @@ export function ConnPanel() {
           downNodes,
           downLinks,
           timeout: timeoutSim,
-          packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol },
+          packet,
+          bindings,
         }),
       );
       if (reqId.current === id && useTopoStore.getState().editSeq === seq) {
         setResult(res);
         setResultVersion(version);
-        const packet = { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol };
         const key = trialKey(src, dst, downNodes, downLinks, timeoutSim, packet);
         const trial: ConnTrial = { key, version, source: src, target: dst, downNodes, downLinks, timeout: timeoutSim, packet, result: res };
         saveTrial(version, trial);
@@ -92,13 +98,16 @@ export function ConnPanel() {
   function registerConnection() {
     if (!result || !result.establishable) return;
     const path = result.forward.paths[0];
+    const connectionId = result.mappings?.[0]?.connectionId
+      ?? path?.mappings?.[0]?.connectionId
+      ?? `${result.source}->${result.target}:${srcIP}:${srcPort}->${dstIP}:${dstPort}`;
     const conn: Connection = {
       id: uid("c"),
       source: result.source,
       target: result.target,
       pathNodeIds: path ? path.nodeIds : undefined,
       mappings: result.mappings ?? path?.mappings ?? [],
-      packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol, connectionId: result.mappings?.[0]?.connectionId },
+      packet: { source: { ip: srcIP, port: srcPort }, destination: { ip: dstIP, port: dstPort }, protocol, connectionId },
       state: "established",
     };
     const next = [...conns, conn];
@@ -127,6 +136,21 @@ export function ConnPanel() {
    }
     setResult(normalizeConnResult(t.result));
     setResultVersion(t.version);
+  }
+
+  function loadConn(c: Connection) {
+    setSrc(c.source);
+    setDst(c.target);
+    if (c.packet) {
+      setSrcIP(c.packet.source.ip);
+      setSrcPort(c.packet.source.port);
+      setDstIP(c.packet.destination.ip);
+      setDstPort(c.packet.destination.port);
+      setProtocol(c.packet.protocol ?? "tcp");
+    }
+    setResult(null);
+    setResultVersion(null);
+    setErr("已载入登记连接的报文：运行试算将沿用其建立时映射验证保持/回程，其他连接的映射仍视为已占用");
   }
 
   const stateLabel: Record<string, string> = {
@@ -264,6 +288,13 @@ export function ConnPanel() {
               <li key={c.id}>
                 <code>{c.id}</code> {c.source} → {c.target}
                 {c.pathNodeIds && <span className="hint">（路径：{c.pathNodeIds.join(" → ")}）</span>}
+                {(c.mappings?.length ?? 0) > 0 && (
+                  <span className="hint">
+                    {" 映射："}
+                    {c.mappings!.map((m) => `${m.device} ${m.original.ip}:${m.original.port}→${m.translated.ip}:${m.translated.port}`).join("；")}
+                  </span>
+                )}
+                <button onClick={() => loadConn(c)}>载入报文试算</button>
                 <button onClick={() => unregister(c.id)}>移除</button>
               </li>
             ))}

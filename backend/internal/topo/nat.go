@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -239,22 +240,32 @@ func (t *Topology) natRuleFor(device, linkID, sourceIP string) (NATRule, bool) {
 }
 
 func (t *Topology) allocatePort(rule NATRule, pkt *Packet, external []NATBinding, created map[string]NATBinding) (int, error) {
-	used := map[int]bool{}
+	// Translation ports are occupied on the translated address itself:
+	// when two gateway devices share the same external IP pool (e.g.
+	// consecutive SNAT ranges), a port taken by one gateway is not
+	// available to another host behind the other gateway either.
+	usedShared := map[string]bool{}
 	for _, b := range external {
-		if b.Device == rule.Device && b.State != bindingExpired && b.Translated.IP == rule.TranslatedIP {
-			used[b.Translated.Port] = true
+		if b.State == bindingExpired {
+			continue
+		}
+		if b.Translated.IP == rule.TranslatedIP {
+			usedShared[b.Translated.IP+":"+strconv.Itoa(b.Translated.Port)] = true
 		}
 	}
 	for _, b := range created {
-		if b.Device == rule.Device && b.Translated.IP == rule.TranslatedIP {
-			used[b.Translated.Port] = true
+		if b.Translated.IP == rule.TranslatedIP {
+			usedShared[b.Translated.IP+":"+strconv.Itoa(b.Translated.Port)] = true
 		}
 	}
-	if rule.PreservePort && pkt.Source.Port >= rule.PortStart && pkt.Source.Port <= rule.PortEnd && !used[pkt.Source.Port] {
+	portTaken := func(port int) bool {
+		return usedShared[rule.TranslatedIP+":"+strconv.Itoa(port)]
+	}
+	if rule.PreservePort && pkt.Source.Port >= rule.PortStart && pkt.Source.Port <= rule.PortEnd && !portTaken(pkt.Source.Port) {
 		return pkt.Source.Port, nil
 	}
 	for port := rule.PortStart; port <= rule.PortEnd; port++ {
-		if !used[port] {
+		if !portTaken(port) {
 			return port, nil
 		}
 	}

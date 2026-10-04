@@ -296,6 +296,8 @@ type connCheckReq struct {
 	DownNodes []string       `json:"downNodes,omitempty"`
 	DownLinks []string       `json:"downLinks,omitempty"`
 	Timeout   bool           `json:"timeout,omitempty"`
+	Packet    *topo.Packet   `json:"packet,omitempty"`
+	Bindings  []topo.NATBinding `json:"bindings,omitempty"`
 }
 
 // connCheck evaluates the connection lifecycle (establish / maintain /
@@ -322,6 +324,8 @@ func (s *server) connCheck(w http.ResponseWriter, r *http.Request) {
 		DownNodes: req.DownNodes,
 		DownLinks: req.DownLinks,
 		Timeout:   req.Timeout,
+		Packet:    req.Packet,
+		Bindings:  req.Bindings,
 	})
 	if err != nil {
 		writeErr(w, 400, err)
