@@ -63,6 +63,15 @@ export function ConnPanel() {
     };
   }
 
+  // Editing any packet field means the packet no longer belongs to the
+  // loaded connection: drop the borrowed connection identity so the
+  // next trial runs as a new connection instead of reusing another
+  // host's registered mapping.
+  function editPacket(set: () => void) {
+    set();
+    setActiveConnId(null);
+  }
+
   function occupiedBindings(): NATBinding[] {
     return conns.flatMap((c) =>
       (c.mappings ?? [])
@@ -202,13 +211,13 @@ export function ConnPanel() {
     <div className="conn">
       <div className="row2">
         <label>从
-          <select value={src} onChange={(e) => setSrc(e.target.value)}>
+          <select value={src} onChange={(e) => editPacket(() => setSrc(e.target.value))}>
             <option value="">选择源…</option>
             {topo.nodes.map((n) => <option key={n.id} value={n.id}>{n.name} ({n.id})</option>)}
           </select>
         </label>
         <label>到
-          <select value={dst} onChange={(e) => setDst(e.target.value)}>
+          <select value={dst} onChange={(e) => editPacket(() => setDst(e.target.value))}>
             <option value="">选择宿…</option>
             {topo.nodes.map((n) => <option key={n.id} value={n.id}>{n.name} ({n.id})</option>)}
           </select>
@@ -219,22 +228,22 @@ export function ConnPanel() {
         <legend>报文与试算条件（不影响当前草稿与任何已保存方案）</legend>
         <div className="row2">
           <label>源地址:端口
-            <input value={srcIP} onChange={(e) => setSrcIP(e.target.value)} />
+            <input value={srcIP} onChange={(e) => editPacket(() => setSrcIP(e.target.value))} />
           </label>
           <label>源端口
-            <input type="number" value={srcPort} onChange={(e) => setSrcPort(Number(e.target.value))} />
+            <input type="number" value={srcPort} onChange={(e) => editPacket(() => setSrcPort(Number(e.target.value)))} />
           </label>
         </div>
         <div className="row2">
           <label>目标地址:端口
-            <input value={dstIP} onChange={(e) => setDstIP(e.target.value)} />
+            <input value={dstIP} onChange={(e) => editPacket(() => setDstIP(e.target.value))} />
           </label>
           <label>目标端口
-            <input type="number" value={dstPort} onChange={(e) => setDstPort(Number(e.target.value))} />
+            <input type="number" value={dstPort} onChange={(e) => editPacket(() => setDstPort(Number(e.target.value)))} />
           </label>
         </div>
         <label>协议
-          <input value={protocol} onChange={(e) => setProtocol(e.target.value)} />
+          <input value={protocol} onChange={(e) => editPacket(() => setProtocol(e.target.value))} />
         </label>
         <label className="inline">
           <input type="checkbox" checked={timeoutSim} onChange={(e) => setTimeoutSim(e.target.checked)} />

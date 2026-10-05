@@ -132,6 +132,9 @@ func (t *Topology) applyForwardBinding(device, linkID, state string, pkt *Packet
 			}
 			break
 		}
+		if !bindingOwnsPacket(b, pkt) {
+			return denyBinding(device, "snat", b, "mapping-owner-mismatch", fmt.Sprintf("连接 %s 的映射登记原始端点为 %s（目标 %s），与当前报文源 %s 不符；不能把其他主机的转换地址或端口复用为当前连接", b.ConnectionID, b.Original, b.Destination, pkt.Source), pkt)
+		}
 		return bindingDecision(device, "snat", "reused", pkt, b)
 	}
 	if state == StateEstablished {
@@ -181,6 +184,24 @@ func bindingDecision(device, action, decision string, pkt *Packet, b NATBinding)
 	before := pkt.Source
 	pkt.Source = b.Translated
 	return &NATDecision{Device: device, RuleID: b.RuleID, RuleOrder: b.RuleOrder, Action: action, Before: before, After: b.Translated, Decision: decision, Detail: fmt.Sprintf("沿用连接 %s 建立时的原映射（规则 %s，顺序 %d）：%s → %s", b.ConnectionID, b.RuleID, b.RuleOrder, before, b.Translated), Binding: &b}
+}
+
+// bindingOwnsPacket reports whether the packet's current endpoint is
+// the exact original endpoint the binding was registered for. A
+// mapping belongs to one connection of one host: a packet whose
+// source, destination or protocol differs must never be translated
+// by it, even if it carries the same connection ID.
+func bindingOwnsPacket(b NATBinding, pkt *Packet) bool {
+	if b.Original != pkt.Source {
+		return false
+	}
+	if b.Destination != (Address{}) && b.Destination != pkt.Destination {
+		return false
+	}
+	if b.Protocol != "" && pkt.Protocol != "" && b.Protocol != pkt.Protocol {
+		return false
+	}
+	return true
 }
 
 func denyBinding(device, action string, b NATBinding, reason, detail string, pkt *Packet) *NATDecision {
