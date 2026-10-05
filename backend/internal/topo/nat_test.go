@@ -290,3 +290,104 @@ func TestCompareConnExistingMappingIgnoresCurrentNATRange(t *testing.T) {
 }
 
 func packetPtr(p Packet) *Packet { return &p }
+
+// twoNATSinglePortTopo chains two NAT gateways that each expose exactly
+// one translation port, so any second connection must contend for the
+// port already occupied by the registered h1 connection.
+func twoNATSinglePortTopo() *Topology {
+	topo := natTopo()
+	topo.Nodes = append(topo.Nodes,
+		Node{ID: "h3", Kind: "host"},
+		Node{ID: "n2", Kind: "nat"},
+	)
+	topo.Links = []Link{
+		{ID: "l0", Source: "h3", Target: "n1", Kind: LinkUndirected},
+		{ID: "l1", Source: "h1", Target: "n1", Kind: LinkUndirected},
+		{ID: "l2", Source: "n1", Target: "n2", Kind: LinkUndirected},
+		{ID: "l3", Source: "n2", Target: "s1", Kind: LinkUndirected},
+		{ID: "l4", Source: "s1", Target: "h2", Kind: LinkUndirected},
+	}
+	topo.NATRules[0].EgressLinkID = "l2"
+	topo.NATRules[0].PortStart, topo.NATRules[0].PortEnd = 2000, 2000
+	topo.NATRules = append(topo.NATRules, NATRule{
+		ID: "nat2", Device: "n2", EgressLinkID: "l3", Order: 2, Enabled: true,
+		MatchSourceIP: "198.51.100.0/24", TranslatedIP: "203.0.113.1", PortStart: 4000, PortEnd: 4000,
+	})
+	return topo
+}
+
+func h1RegisteredBindings() []NATBinding {
+	return []NATBinding{
+		{ConnectionID: "c1", Device: "n1", RuleID: "nat1", Protocol: "tcp",
+			Original: Address{IP: "10.0.0.10", Port: 40001}, Translated: Address{IP: "198.51.100.1", Port: 2000},
+			Destination: Address{IP: "203.0.113.20", Port: 80}, State: bindingEstablished},
+		{ConnectionID: "c1", Device: "n2", RuleID: "nat2", Protocol: "tcp",
+			Original: Address{IP: "198.51.100.1", Port: 2000}, Translated: Address{IP: "203.0.113.1", Port: 4000},
+			Destination: Address{IP: "203.0.113.20", Port: 80}, State: bindingEstablished},
+	}
+}
+
+func h3Packet(connID string) Packet {
+	return Packet{ConnectionID: connID, Protocol: "tcp",
+		Source:      Address{IP: "10.0.0.30", Port: 40001},
+		Destination: Address{IP: "203.0.113.20", Port: 80},
+	}
+}
+
+func TestNATSinglePortContentionNewConnectionDenied(t *testing.T) {
+	topo := twoNATSinglePortTopo()
+	pkt := h3Packet("c3")
+	res, err := topo.ConnCheck("h3", "h2", 1, ConnOptions{Packet: &pkt, Bindings: h1RegisteredBindings()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Establishable || res.Bidirectional {
+		t.Fatalf("single port occupied by h1: h3 must not establish: %+v", res)
+	}
+	var denied *NATDecision
+	for _, p := range res.Forward.Blocked {
+		for i := range p.Hops {
+			if h := p.Hops[i]; h.NAT != nil && h.NAT.Decision == "denied" && h.NAT.Reason == "port-exhausted" {
+				denied = h.NAT
+			}
+		}
+	}
+	if denied == nil || denied.Device != "n1" {
+		t.Fatalf("denial must cite port exhaustion on the occupied gateway: %+v", denied)
+	}
+}
+
+func TestNATForeignConnectionIDCannotReuseMapping(t *testing.T) {
+	topo := twoNATSinglePortTopo()
+	pkt := h3Packet("c1") // h3 claims the connection ID registered to h1
+	res, err := topo.ConnCheck("h3", "h2", 1, ConnOptions{Packet: &pkt, Bindings: h1RegisteredBindings(), Existing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Establishable || res.Bidirectional {
+		t.Fatalf("h3 must not reuse h1's translated address/port: %+v", res)
+	}
+	var denied *NATDecision
+	for _, p := range res.Forward.Blocked {
+		for i := range p.Hops {
+			if h := p.Hops[i]; h.NAT != nil && h.NAT.Decision == "denied" && h.NAT.Reason == "mapping-ownership" {
+				denied = h.NAT
+			}
+		}
+	}
+	if denied == nil || !strings.Contains(denied.Detail, "其他主机") {
+		t.Fatalf("denial must explain the mapping belongs to another host: %+v", denied)
+	}
+}
+
+func TestNATRegisteredConnectionKeepsOwnMapping(t *testing.T) {
+	topo := twoNATSinglePortTopo()
+	pkt := natPacket("c1", 40001)
+	res, err := topo.ConnCheck("h1", "h2", 1, ConnOptions{Packet: &pkt, Bindings: h1RegisteredBindings(), Existing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Establishable || !res.Bidirectional {
+		t.Fatalf("the registered owner must keep its own mapping on both gateways: %+v", res)
+	}
+}

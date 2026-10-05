@@ -126,10 +126,14 @@ func (t *Topology) applyForwardBinding(device, linkID, state string, pkt *Packet
 		if b.Device != device || b.ConnectionID != pkt.ConnectionID {
 			continue
 		}
-		if b.State == bindingExpired || state == StateNew {
-			if b.State == bindingExpired {
-				return denyBinding(device, "snat", b, "mapping-expired", "旧连接映射已超时，不能复用转换端口", pkt)
-			}
+		if b.State == bindingExpired {
+			return denyBinding(device, "snat", b, "mapping-expired", "旧连接映射已超时，不能复用转换端口", pkt)
+		}
+		if !bindingOwnedBy(b, pkt) {
+			detail := fmt.Sprintf("连接 %s 在设备 %s 登记的映射属于 %s → %s，与当前报文 %s → %s 不符；不能把其他主机占用的转换地址或端口复用为当前连接", b.ConnectionID, device, b.Original, b.Destination, pkt.Source, pkt.Destination)
+			return denyBinding(device, "snat", b, "mapping-ownership", detail, pkt)
+		}
+		if state == StateNew {
 			break
 		}
 		return bindingDecision(device, "snat", "reused", pkt, b)
@@ -194,6 +198,24 @@ func findBinding(bindings []NATBinding, device, connID string, translated Addres
 		}
 	}
 	return NATBinding{}, false
+}
+
+// bindingOwnedBy reports whether the packet's own endpoints match the
+// endpoints the binding was established for. A connection ID alone
+// never proves ownership: another host must not reuse the translated
+// address or port registered to a different 5-tuple.
+func bindingOwnedBy(b NATBinding, pkt *Packet) bool {
+	zero := Address{}
+	if b.Original != zero && b.Original != pkt.Source {
+		return false
+	}
+	if b.Destination != zero && b.Destination != pkt.Destination {
+		return false
+	}
+	if b.Protocol != "" && pkt.Protocol != "" && b.Protocol != pkt.Protocol {
+		return false
+	}
+	return true
 }
 
 func requireConnectionBindings(p *Path, connID string, bindings []NATBinding, state string) string {
